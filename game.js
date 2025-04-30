@@ -1,27 +1,4 @@
-var __extends = (this && this.__extends) || (function () {
-    var extendStatics = function (d, b) {
-        extendStatics = Object.setPrototypeOf ||
-            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
-            function (d, b) { for (var p in b) if (Object.prototype.hasOwnProperty.call(b, p)) d[p] = b[p]; };
-        return extendStatics(d, b);
-    };
-    return function (d, b) {
-        if (typeof b !== "function" && b !== null)
-            throw new TypeError("Class extends value " + String(b) + " is not a constructor or null");
-        extendStatics(d, b);
-        function __() { this.constructor = d; }
-        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
-    };
-})();
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
+"use strict";
 var Cell;
 (function (Cell) {
     Cell[Cell["empty"] = 0] = "empty";
@@ -32,43 +9,50 @@ var Cell;
     Cell[Cell["powerupFirePower"] = 5] = "powerupFirePower";
     Cell[Cell["powerupBomb"] = 6] = "powerupBomb";
 })(Cell || (Cell = {}));
-var canvas = document.getElementById("game");
-var ctx = canvas.getContext("2d");
-var TILE_SIZE = 35;
-var COLS = 20;
-var ROWS = 18;
-var MOVE_COOLDOWN = 150;
-var BOMB_FUSE = 2000;
-var EXPLOSION_DURATION = 500;
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const TILE_SIZE = 35;
+const COLS = 20;
+const ROWS = 18;
+const MOVE_COOLDOWN = 150;
+const BOMB_FUSE = 2000;
+const EXPLOSION_DURATION = 500;
+const CRATE_REFILL_INTERVAL = 20000; // 20s
 canvas.width = COLS * TILE_SIZE;
 canvas.height = ROWS * TILE_SIZE;
-var grid = [];
-var player;
-var bots = [];
-var bombs = [];
-var explosions = [];
-// input queue
-var pendingMove = null;
-var pendingBomb = false;
-document.getElementById("withBots").onclick = function () {
-    var color = document.getElementById("color").value;
+let grid = [];
+let player;
+let bots = [];
+let bombs = [];
+let explosions = [];
+const chainMap = new Map();
+// input
+let pendingMove = null;
+let pendingBomb = false;
+// scoreboard elems
+const scoreBoard = document.getElementById("scoreboard");
+const killEl = document.getElementById("kills");
+const deathEl = document.getElementById("deaths");
+const assistEl = document.getElementById("assists");
+document.getElementById("withBots").onclick = () => {
+    const color = document.getElementById("color").value;
     player = new Player(color);
     init();
 };
-window.addEventListener("keydown", function (e) {
-    var dirs = {
+window.addEventListener("keydown", (e) => {
+    const dirs = {
         ArrowUp: [0, -1],
         ArrowDown: [0, 1],
         ArrowLeft: [-1, 0],
         ArrowRight: [1, 0],
     };
-    if (e.key in dirs)
+    if (dirs[e.key])
         pendingMove = dirs[e.key];
     if (e.key === " ")
         pendingBomb = true;
 });
-var Player = /** @class */ (function () {
-    function Player(color) {
+class Player {
+    constructor(color) {
         this.color = color;
         this.x = 1;
         this.y = 1;
@@ -76,29 +60,29 @@ var Player = /** @class */ (function () {
         this.maxBombs = 1;
         this.activeBombs = 0;
         this.lastMoveAt = 0;
+        this.kills = 0;
+        this.deaths = 0;
+        this.assists = 0;
     }
-    return Player;
-}());
-var Bot = /** @class */ (function (_super) {
-    __extends(Bot, _super);
-    function Bot(x, y) {
-        var _this = _super.call(this, "#8000fa") || this;
-        _this.x = x;
-        _this.y = y;
-        return _this;
+}
+class Bot extends Player {
+    constructor(x, y) {
+        super("#8000fa");
+        this.x = x;
+        this.y = y;
     }
-    Bot.prototype.tryStep = function () {
-        var now = Date.now();
+    tryStep() {
+        const now = performance.now();
         if (now - this.lastMoveAt < MOVE_COOLDOWN)
             return;
         this.lastMoveAt = now;
-        var dirs = [
+        const dirs = [
             [1, 0],
             [-1, 0],
             [0, 1],
             [0, -1],
         ];
-        var _a = dirs[Math.floor(Math.random() * 4)], dx = _a[0], dy = _a[1];
+        const [dx, dy] = dirs[Math.floor(Math.random() * 4)];
         if (isEmpty(this.x + dx, this.y + dy)) {
             this.x += dx;
             this.y += dy;
@@ -106,22 +90,22 @@ var Bot = /** @class */ (function (_super) {
         }
         if (Math.random() < 0.03)
             placeBomb(this);
-    };
-    Bot.prototype.checkPickup = function () {
-        var cell = grid[this.y][this.x];
-        if (cell === Cell.powerupFirePower) {
+    }
+    checkPickup() {
+        const c = grid[this.y][this.x];
+        if (c === Cell.powerupFirePower) {
             this.firePower++;
             grid[this.y][this.x] = Cell.empty;
         }
-        if (cell === Cell.powerupBomb) {
+        if (c === Cell.powerupBomb) {
             this.maxBombs++;
             grid[this.y][this.x] = Cell.empty;
         }
-    };
-    return Bot;
-}(Player));
+    }
+}
 function init() {
     document.getElementById("menu").style.display = "none";
+    scoreBoard.style.display = "block";
     canvas.style.display = "block";
     buildGrid();
     bots = [
@@ -130,23 +114,19 @@ function init() {
         new Bot(COLS - 2, 1),
     ];
     lastFrame = performance.now();
+    crateTimer = 0;
     requestAnimationFrame(gameLoop);
 }
 function buildGrid() {
-    for (var y = 0; y < ROWS; y++) {
+    for (let y = 0; y < ROWS; y++) {
         grid[y] = [];
-        for (var x = 0; x < COLS; x++) {
-            var isWall = x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1;
-            var isEveryTwoCells = x % 2 === 0 && y % 2 === 0;
-            if (isWall || isEveryTwoCells) {
+        for (let x = 0; x < COLS; x++) {
+            const border = x === 0 || y === 0 || x === COLS - 1 || y === ROWS - 1;
+            const block = x % 2 === 0 && y % 2 === 0;
+            if (border || block)
                 grid[y][x] = Cell.wall;
-            }
-            else if (Math.random() < 0.5) {
-                grid[y][x] = Cell.crate;
-            }
-            else {
-                grid[y][x] = Cell.empty;
-            }
+            else
+                grid[y][x] = Math.random() < 0.5 ? Cell.crate : Cell.empty;
         }
     }
 }
@@ -157,26 +137,23 @@ function placeBomb(actor) {
         return;
     grid[actor.y][actor.x] = Cell.bomb;
     actor.activeBombs++;
-    bombs.push({
-        x: actor.x,
-        y: actor.y,
-        owner: actor,
-        fuse: BOMB_FUSE,
-    });
+    const b = { x: actor.x, y: actor.y, owner: actor, fuse: BOMB_FUSE };
+    bombs.push(b);
 }
-var lastFrame = 0;
+let lastFrame = 0;
+let crateTimer = 0;
 function gameLoop(now) {
-    var delta = now - lastFrame;
+    const delta = now - lastFrame;
     lastFrame = now;
-    // 1) player input
+    // 1) player
     if (pendingMove) {
-        var dx = pendingMove[0], dy = pendingMove[1];
+        const [dx, dy] = pendingMove;
         if (now - player.lastMoveAt >= MOVE_COOLDOWN &&
             isEmpty(player.x + dx, player.y + dy)) {
             player.x += dx;
             player.y += dy;
             player.lastMoveAt = now;
-            checkPlayerPickup();
+            checkPickup();
         }
         pendingMove = null;
     }
@@ -184,83 +161,83 @@ function gameLoop(now) {
         placeBomb(player);
         pendingBomb = false;
     }
-    // 2) bots moving
-    bots.forEach(function (b) { return b.tryStep(); });
+    // 2) bots
+    bots.forEach((b) => b.tryStep());
     // 3) bombs
-    for (var i = bombs.length - 1; i >= 0; i--) {
-        bombs[i].fuse -= delta;
-        if (bombs[i].fuse <= 0) {
-            var b = bombs[i];
+    for (let i = bombs.length - 1; i >= 0; i--) {
+        const b = bombs[i];
+        b.fuse -= delta;
+        if (b.fuse <= 0) {
             explode(b);
             bombs.splice(i, 1);
             b.owner.activeBombs--;
+            chainMap.delete(b);
         }
     }
     // 4) explosions
-    for (var i = explosions.length - 1; i >= 0; i--) {
+    for (let i = explosions.length - 1; i >= 0; i--) {
         explosions[i].timer -= delta;
         if (explosions[i].timer <= 0) {
-            var e = explosions[i];
+            const e = explosions[i];
             if (grid[e.y][e.x] === Cell.explosion)
                 grid[e.y][e.x] = e.spawn;
             explosions.splice(i, 1);
         }
     }
-    // 5) render
+    // 5) crate refill
+    crateTimer += delta;
+    if (crateTimer >= CRATE_REFILL_INTERVAL) {
+        crateTimer = 0;
+        refillCrates();
+    }
     draw();
     requestAnimationFrame(gameLoop);
 }
 function explode(bomb) {
-    var x = bomb.x, y = bomb.y, owner = bomb.owner;
-    var toSpawn = function (explodedStuff) {
-        if (explodedStuff !== Cell.crate)
+    const trigger = chainMap.get(bomb) || bomb.owner;
+    const toSpawn = (old) => {
+        if (old !== Cell.crate)
             return Cell.empty;
-        var r = Math.random();
+        const r = Math.random();
         if (r < 0.1)
             return Cell.powerupFirePower;
         if (r < 0.2)
             return Cell.powerupBomb;
         return Cell.empty;
     };
-    // collect explosion cells
-    var cells = [];
-    // center
+    const cells = [];
     cells.push({
-        x: x,
-        y: y,
+        x: bomb.x,
+        y: bomb.y,
         timer: EXPLOSION_DURATION,
-        spawn: toSpawn(grid[y][x]),
+        spawn: toSpawn(grid[bomb.y][bomb.x]),
     });
-    // four directions
-    for (var _i = 0, _a = [
+    for (const [dx, dy] of [
         [1, 0],
         [-1, 0],
         [0, 1],
         [0, -1],
-    ]; _i < _a.length; _i++) {
-        var _b = _a[_i], dx = _b[0], dy = _b[1];
-        for (var i = 1; i <= owner.firePower; i++) {
-            var nx = x + dx * i, ny = y + dy * i;
+    ]) {
+        for (let i = 1; i <= bomb.owner.firePower; i++) {
+            const nx = bomb.x + dx * i, ny = bomb.y + dy * i;
             if (!inBounds(nx, ny) || grid[ny][nx] === Cell.wall)
                 break;
-            if (grid[ny][nx] === Cell.crate) {
+            if (grid[ny][nx] === Cell.bomb) {
+                // chain
+                const child = bombs.find((b2) => b2.x === nx && b2.y === ny);
+                if (child) {
+                    child.fuse = 0;
+                    chainMap.set(child, trigger);
+                }
+            }
+            if (grid[ny][nx] === Cell.crate || grid[ny][nx] === Cell.bomb) {
                 cells.push({
                     x: nx,
                     y: ny,
                     timer: EXPLOSION_DURATION,
-                    spawn: toSpawn(Cell.crate),
+                    spawn: toSpawn(grid[ny][nx]),
                 });
                 break;
-            }
-            if (grid[ny][nx] === Cell.bomb) {
-                // chain reaction
-                for (var _c = 0, bombs_1 = bombs; _c < bombs_1.length; _c++) {
-                    var b2 = bombs_1[_c];
-                    if (b2.x === nx && b2.y === ny) {
-                        b2.fuse = 0;
-                        break;
-                    }
-                }
             }
             cells.push({
                 x: nx,
@@ -270,24 +247,34 @@ function explode(bomb) {
             });
         }
     }
-    // apply explosion
-    for (var _d = 0, cells_1 = cells; _d < cells_1.length; _d++) {
-        var e = cells_1[_d];
+    // apply
+    cells.forEach((e) => {
         grid[e.y][e.x] = Cell.explosion;
         explosions.push(e);
-    }
-    // reset any actor on explosion
-    __spreadArray([player], bots, true).forEach(function (actor) {
-        if (grid[actor.y][actor.x] === Cell.explosion && actor === player) {
-            actor.x = 1;
-            actor.y = 1;
-            actor.firePower = 2;
-            actor.maxBombs = 1;
+    });
+    // handle deaths & scoring
+    [player, ...bots].forEach((act) => {
+        if (grid[act.y][act.x] === Cell.explosion) {
+            if (act === player) {
+                player.deaths++;
+                resetPlayer();
+            }
+            else {
+                // bot died
+                if (trigger === player) {
+                    // assist if chain, else kill
+                    if (chainMap.has(bomb))
+                        player.assists++;
+                    else
+                        player.kills++;
+                }
+            }
+            updateScoreboard();
         }
     });
 }
-function checkPlayerPickup() {
-    var c = grid[player.y][player.x];
+function checkPickup() {
+    const c = grid[player.y][player.x];
     if (c === Cell.powerupFirePower) {
         player.firePower++;
         grid[player.y][player.x] = Cell.empty;
@@ -297,10 +284,38 @@ function checkPlayerPickup() {
         grid[player.y][player.x] = Cell.empty;
     }
 }
+function refillCrates() {
+    const total = COLS * ROWS;
+    const crates = grid.flat().filter((c) => c === Cell.crate).length;
+    if (crates < total * 0.1) {
+        const target = Math.ceil(total * 0.15) - crates;
+        let added = 0;
+        while (added < target) {
+            const x = Math.floor(Math.random() * COLS);
+            const y = Math.floor(Math.random() * ROWS);
+            if (grid[y][x] === Cell.empty && !(x === player.x && y === player.y)) {
+                grid[y][x] = Cell.crate;
+                added++;
+            }
+        }
+    }
+}
+function resetPlayer() {
+    player.x = 1;
+    player.y = 1;
+    player.firePower = 2;
+    player.maxBombs = 1;
+    player.activeBombs = 0;
+}
+function updateScoreboard() {
+    killEl.textContent = player.kills.toString();
+    deathEl.textContent = player.deaths.toString();
+    assistEl.textContent = player.assists.toString();
+}
 function isEmpty(x, y) {
     if (!inBounds(x, y))
         return false;
-    var c = grid[y][x];
+    const c = grid[y][x];
     return (c === Cell.empty || c === Cell.powerupFirePower || c === Cell.powerupBomb);
 }
 function inBounds(x, y) {
@@ -308,9 +323,9 @@ function inBounds(x, y) {
 }
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (var y = 0; y < ROWS; y++) {
-        for (var x = 0; x < COLS; x++) {
-            var c = grid[y][x];
+    for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+            const c = grid[y][x];
             ctx.fillStyle =
                 c === Cell.wall
                     ? "gray"
@@ -328,7 +343,7 @@ function draw() {
             ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
     }
-    __spreadArray([player], bots, true).forEach(function (ent) {
+    [player, ...bots].forEach((ent) => {
         ctx.fillStyle = ent.color;
         ctx.fillRect(ent.x * TILE_SIZE + 5, ent.y * TILE_SIZE + 5, TILE_SIZE - 10, TILE_SIZE - 10);
     });
