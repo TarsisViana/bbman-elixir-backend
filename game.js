@@ -11,6 +11,19 @@ var Cell;
 })(Cell || (Cell = {}));
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+/* ---------- play mode ---------- */
+var Mode;
+(function (Mode) {
+    Mode[Mode["Local"] = 0] = "Local";
+    Mode[Mode["Online"] = 1] = "Online";
+})(Mode || (Mode = {}));
+let mode = Mode.Local;
+/* ---------- networking ---------- */
+let ws = null;
+let myId = "";
+/* ---------- UI hooks ---------- */
+document.getElementById("withBots").onclick = startLocal;
+document.getElementById("online").onclick = startOnline;
 const TILE_SIZE = 35;
 const COLS = 20;
 const ROWS = 18;
@@ -26,6 +39,7 @@ let bots = [];
 let bombs = [];
 let explosions = [];
 const chainMap = new Map();
+let crateTimer = 0;
 // input
 let pendingMove = null;
 let pendingBomb = false;
@@ -34,22 +48,88 @@ const scoreBoard = document.getElementById("scoreboard");
 const killEl = document.getElementById("kills");
 const deathEl = document.getElementById("deaths");
 const assistEl = document.getElementById("assists");
-document.getElementById("withBots").onclick = () => {
+/* ===================================================================== */
+/*                           LOCAL  MODE                                 */
+/* ===================================================================== */
+function startLocal() {
+    mode = Mode.Local;
     const color = document.getElementById("color").value;
     player = new Player(color);
     init();
-};
+}
+/* ===================================================================== */
+/*                           ONLINE  MODE                                */
+/* ===================================================================== */
+function startOnline() {
+    mode = Mode.Online;
+    const color = document.getElementById("color").value;
+    openSocket(color);
+}
+function openSocket(color) {
+    ws = new WebSocket("ws://localhost:4000");
+    ws.onopen = () => ws.send(JSON.stringify({ t: "join", color }));
+    ws.onmessage = (ev) => handleServer(JSON.parse(ev.data));
+    ws.onclose = () => alert("Disconnected");
+    prepareCanvasForOnline();
+}
+function prepareCanvasForOnline() {
+    document.getElementById("menu").style.display = "none";
+    scoreBoard.style.display = "block";
+    canvas.style.display = "block";
+    bombs.length = explosions.length = 0;
+}
+function syncScores(all) {
+    const me = all[myId];
+    if (!me)
+        return; // not received yet
+    killEl.textContent = me.k.toString();
+    deathEl.textContent = me.d.toString();
+    assistEl.textContent = me.a.toString();
+}
+function handleServer(msg) {
+    if (msg.t === "init") {
+        myId = msg.id;
+        grid = msg.grid;
+        remoteActors = new Map(msg.actors.map((a) => [a.id, a]));
+        syncScores(msg.scores);
+        draw();
+    }
+    else if (msg.t === "diff") {
+        // patch cells
+        msg.cells.forEach((c) => (grid[c.y][c.x] = c.v));
+        // patch actors
+        if (msg.scores)
+            syncScores(msg.scores);
+        msg.actors.forEach((a) => {
+            if (!remoteActors.has(a.id))
+                return;
+            remoteActors.get(a.id).x = a.x;
+            remoteActors.get(a.id).y = a.y;
+        });
+    }
+}
+/* ---------- client input ---------- */
 window.addEventListener("keydown", (e) => {
-    const dirs = {
+    const dir = {
         ArrowUp: [0, -1],
         ArrowDown: [0, 1],
         ArrowLeft: [-1, 0],
         ArrowRight: [1, 0],
     };
-    if (dirs[e.key])
-        pendingMove = dirs[e.key];
-    if (e.key === " ")
-        pendingBomb = true;
+    if (mode === Mode.Local) {
+        if (dir[e.key])
+            pendingMove = dir[e.key];
+        if (e.key === " ")
+            pendingBomb = true;
+    }
+    else {
+        if (!ws || ws.readyState !== 1)
+            return;
+        if (dir[e.key])
+            ws.send(JSON.stringify({ t: "move", dir: dir[e.key] }));
+        if (e.key === " ")
+            ws.send(JSON.stringify({ t: "bomb" }));
+    }
 });
 class Player {
     constructor(color) {
@@ -140,11 +220,21 @@ function placeBomb(actor) {
     const b = { x: actor.x, y: actor.y, owner: actor, fuse: BOMB_FUSE };
     bombs.push(b);
 }
-let lastFrame = 0;
-let crateTimer = 0;
+/* ===================================================================== */
+/*                     RENDER LOOP (both modes)                          */
+/* ===================================================================== */
+let remoteActors = new Map(); // online only
+let lastFrame = performance.now();
 function gameLoop(now) {
     const delta = now - lastFrame;
     lastFrame = now;
+    if (mode === Mode.Local)
+        localGameLoop(delta, now);
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop); // bootstrap loop once
+function localGameLoop(delta, now) {
     // 1) player
     if (pendingMove) {
         const [dx, dy] = pendingMove;
@@ -190,8 +280,6 @@ function gameLoop(now) {
         crateTimer = 0;
         refillCrates();
     }
-    draw();
-    requestAnimationFrame(gameLoop);
 }
 function explode(bomb) {
     const trigger = chainMap.get(bomb) || bomb.owner;
@@ -343,8 +431,20 @@ function draw() {
             ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
     }
-    [player, ...bots].forEach((ent) => {
-        ctx.fillStyle = ent.color;
-        ctx.fillRect(ent.x * TILE_SIZE + 5, ent.y * TILE_SIZE + 5, TILE_SIZE - 10, TILE_SIZE - 10);
-    });
+    if (mode === Mode.Local) {
+        [player, ...bots].forEach(drawActor);
+    }
+    else {
+        remoteActors.forEach((a) => {
+            ctx.fillStyle = a.id === myId ? "#fff" : a.color;
+            drawRect(a.x, a.y);
+        });
+    }
+}
+function drawActor(a) {
+    ctx.fillStyle = a.color;
+    drawRect(a.x, a.y);
+}
+function drawRect(x, y) {
+    ctx.fillRect(x * TILE_SIZE + 5, y * TILE_SIZE + 5, TILE_SIZE - 10, TILE_SIZE - 10);
 }

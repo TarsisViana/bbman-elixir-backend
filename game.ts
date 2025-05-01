@@ -8,11 +8,52 @@ enum Cell {
   powerupBomb,
 }
 
+/* ---------- types shared with server ---------- */
+interface ServerInit {
+  t: "init";
+  id: string; // my authoritative id
+  grid: Cell[][];
+  actors: RemoteActor[];
+  scores: Record<string, Score>;
+}
+interface ServerDiff {
+  t: "diff";
+  cells: PatchCell[];
+  actors: PatchActor[];
+  scores?: Record<string, Score>;
+}
+
+type ServerMsg = ServerInit | ServerDiff;
+
+interface PatchCell {
+  x: number;
+  y: number;
+  v: Cell;
+}
+interface PatchActor {
+  id: string;
+  x: number;
+  y: number;
+  alive: boolean;
+}
+interface RemoteActor {
+  id: string;
+  x: number;
+  y: number;
+  color: string;
+}
+interface Score {
+  k: number;
+  d: number;
+  a: number;
+}
+/* ---------- local-only structures ---------- */
+
 interface Bomb {
   x: number;
   y: number;
   owner: Actor;
-  fuse: number; // ms until explode
+  fuse: number;
 }
 interface Explosion {
   x: number;
@@ -25,6 +66,20 @@ type Actor = Player | Bot;
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d")!;
+/* ---------- play mode ---------- */
+enum Mode {
+  Local,
+  Online,
+}
+let mode: Mode = Mode.Local;
+
+/* ---------- networking ---------- */
+let ws: WebSocket | null = null;
+let myId = "";
+
+/* ---------- UI hooks ---------- */
+document.getElementById("withBots")!.onclick = startLocal;
+document.getElementById("online")!.onclick = startOnline;
 
 const TILE_SIZE = 35;
 const COLS = 20;
@@ -45,6 +100,7 @@ let bots: Bot[] = [];
 let bombs: Bomb[] = [];
 let explosions: Explosion[] = [];
 const chainMap = new Map<Bomb, Actor>();
+let crateTimer = 0;
 
 // input
 let pendingMove: [number, number] | null = null;
@@ -56,21 +112,88 @@ const killEl = document.getElementById("kills") as HTMLSpanElement;
 const deathEl = document.getElementById("deaths") as HTMLSpanElement;
 const assistEl = document.getElementById("assists") as HTMLSpanElement;
 
-document.getElementById("withBots")!.onclick = () => {
-  const color = (document.getElementById("color") as HTMLSelectElement).value;
+/* ===================================================================== */
+/*                           LOCAL  MODE                                 */
+/* ===================================================================== */
+
+function startLocal() {
+  mode = Mode.Local;
+  const color = (document.getElementById("color") as HTMLInputElement).value;
   player = new Player(color);
   init();
-};
+}
+
+/* ===================================================================== */
+/*                           ONLINE  MODE                                */
+/* ===================================================================== */
+
+function startOnline() {
+  mode = Mode.Online;
+  const color = (document.getElementById("color") as HTMLInputElement).value;
+  openSocket(color);
+}
+
+function openSocket(color: string) {
+  ws = new WebSocket("ws://localhost:4000");
+  ws.onopen = () => ws!.send(JSON.stringify({ t: "join", color }));
+  ws.onmessage = (ev) => handleServer(JSON.parse(ev.data));
+  ws.onclose = () => alert("Disconnected");
+  prepareCanvasForOnline();
+}
+
+function prepareCanvasForOnline() {
+  document.getElementById("menu")!.style.display = "none";
+  scoreBoard.style.display = "block";
+  canvas.style.display = "block";
+  bombs.length = explosions.length = 0;
+}
+
+function syncScores(all: Record<string, Score>) {
+  const me = all[myId];
+  if (!me) return; // not received yet
+  killEl.textContent = me.k.toString();
+  deathEl.textContent = me.d.toString();
+  assistEl.textContent = me.a.toString();
+}
+
+function handleServer(msg: ServerMsg) {
+  if (msg.t === "init") {
+    myId = msg.id;
+    grid = msg.grid;
+    remoteActors = new Map(msg.actors.map((a) => [a.id, a]));
+    syncScores(msg.scores);
+    draw();
+  } else if (msg.t === "diff") {
+    // patch cells
+    msg.cells.forEach((c) => (grid[c.y][c.x] = c.v));
+    // patch actors
+    if (msg.scores) syncScores(msg.scores);
+
+    msg.actors.forEach((a) => {
+      if (!remoteActors.has(a.id)) return;
+      remoteActors.get(a.id)!.x = a.x;
+      remoteActors.get(a.id)!.y = a.y;
+    });
+  }
+}
+
+/* ---------- client input ---------- */
 
 window.addEventListener("keydown", (e) => {
-  const dirs: Record<string, [number, number]> = {
+  const dir: Record<string, [number, number]> = {
     ArrowUp: [0, -1],
     ArrowDown: [0, 1],
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
   };
-  if (dirs[e.key]) pendingMove = dirs[e.key];
-  if (e.key === " ") pendingBomb = true;
+  if (mode === Mode.Local) {
+    if (dir[e.key]) pendingMove = dir[e.key];
+    if (e.key === " ") pendingBomb = true;
+  } else {
+    if (!ws || ws.readyState !== 1) return;
+    if (dir[e.key]) ws.send(JSON.stringify({ t: "move", dir: dir[e.key] }));
+    if (e.key === " ") ws.send(JSON.stringify({ t: "bomb" }));
+  }
 });
 
 class Player {
@@ -161,13 +284,25 @@ function placeBomb(actor: Actor) {
   bombs.push(b);
 }
 
-let lastFrame = 0;
-let crateTimer = 0;
+/* ===================================================================== */
+/*                     RENDER LOOP (both modes)                          */
+/* ===================================================================== */
+
+let remoteActors = new Map<string, RemoteActor>(); // online only
+let lastFrame = performance.now();
 
 function gameLoop(now: number) {
   const delta = now - lastFrame;
   lastFrame = now;
 
+  if (mode === Mode.Local) localGameLoop(delta, now);
+
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop); // bootstrap loop once
+
+function localGameLoop(delta: number, now: number) {
   // 1) player
   if (pendingMove) {
     const [dx, dy] = pendingMove;
@@ -218,9 +353,6 @@ function gameLoop(now: number) {
     crateTimer = 0;
     refillCrates();
   }
-
-  draw();
-  requestAnimationFrame(gameLoop);
 }
 
 function explode(bomb: Bomb) {
@@ -382,13 +514,26 @@ function draw() {
       ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
   }
-  [player, ...bots].forEach((ent) => {
-    ctx.fillStyle = ent.color;
-    ctx.fillRect(
-      ent.x * TILE_SIZE + 5,
-      ent.y * TILE_SIZE + 5,
-      TILE_SIZE - 10,
-      TILE_SIZE - 10
-    );
-  });
+  if (mode === Mode.Local) {
+    [player, ...bots].forEach(drawActor);
+  } else {
+    remoteActors.forEach((a) => {
+      ctx.fillStyle = a.id === myId ? "#fff" : a.color;
+      drawRect(a.x, a.y);
+    });
+  }
+}
+
+function drawActor(a: { x: number; y: number; color: string }) {
+  ctx.fillStyle = a.color;
+  drawRect(a.x, a.y);
+}
+
+function drawRect(x: number, y: number) {
+  ctx.fillRect(
+    x * TILE_SIZE + 5,
+    y * TILE_SIZE + 5,
+    TILE_SIZE - 10,
+    TILE_SIZE - 10
+  );
 }
