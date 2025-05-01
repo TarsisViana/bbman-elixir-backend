@@ -130,9 +130,9 @@ function init() {
 
   buildGrid();
   bots = [
-    new Bot(COLS - 2, ROWS - 2),
-    new Bot(1, ROWS - 2),
-    new Bot(COLS - 2, 1),
+    // new Bot(COLS - 2, ROWS - 2),
+    // new Bot(1, ROWS - 2),
+    // new Bot(COLS - 2, 1),
   ];
 
   lastFrame = performance.now();
@@ -155,8 +155,8 @@ function buildGrid() {
 function placeBomb(actor: Actor) {
   if (actor.activeBombs >= actor.maxBombs) return;
   if (grid[actor.y][actor.x] !== Cell.empty) return;
-  grid[actor.y][actor.x] = Cell.bomb;
   actor.activeBombs++;
+  grid[actor.y][actor.x] = Cell.bomb;
   const b: Bomb = { x: actor.x, y: actor.y, owner: actor, fuse: BOMB_FUSE };
   bombs.push(b);
 }
@@ -195,9 +195,9 @@ function gameLoop(now: number) {
     const b = bombs[i];
     b.fuse -= delta;
     if (b.fuse <= 0) {
+      b.owner.activeBombs--;
       explode(b);
       bombs.splice(i, 1);
-      b.owner.activeBombs--;
       chainMap.delete(b);
     }
   }
