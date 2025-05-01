@@ -1,4 +1,4 @@
-import asyncio, json, secrets, time
+import asyncio, json, secrets, time, concurrent.futures
 import websockets
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ def build_initial_grid() -> list[list[int]]:
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Global state
+# Global state + infra
 # ────────────────────────────────────────────────────────────────────────────
 grid = build_initial_grid()
 players: dict[str, Player] = {}
@@ -86,13 +86,28 @@ explosions: list[Explosion] = []
 updated_cells: set[tuple[int, int]] = set()
 updated_players: set[str] = set()
 
+action_queue: asyncio.Queue = asyncio.Queue()
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=12)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Action helpers
+# ────────────────────────────────────────────────────────────────────────────
+async def enqueue(action: str, *args):
+    await action_queue.put((action, args))
+
+
+def bomb_timer(bomb: Bomb, loop: asyncio.AbstractEventLoop):
+    time.sleep(BOMB_FUSE_MS / 1000)
+    loop.call_soon_threadsafe(action_queue.put_nowait, ("explode", (bomb,)))
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Core mechanics
 # ────────────────────────────────────────────────────────────────────────────
-def set_cell(x: int, y: int, value: int):
-    if in_bounds(x, y) and grid[y][x] != value:
-        grid[y][x] = value
+def set_cell(x: int, y: int, cell_type: Cell):
+    if in_bounds(x, y) and grid[y][x] != cell_type:
+        grid[y][x] = cell_type
         updated_cells.add((x, y))
 
 
@@ -114,7 +129,7 @@ def trigger_explosion(bomb: Bomb):
 def blast_cells(cells: list[tuple[int, int]], owner: Player):
     global explosions
     for x, y in cells:
-        # Chain reaction
+        # chain reaction: explode other bombas
         if grid[y][x] == Cell.bomb:
             for other_bomb in bombs:
                 if other_bomb.x == x and other_bomb.y == y:
@@ -123,7 +138,7 @@ def blast_cells(cells: list[tuple[int, int]], owner: Player):
         set_cell(x, y, Cell.explosion)
         explosions.append(Explosion(x, y))
 
-        # Damage players
+        # kill os desavisados perto
         for player in players.values():
             if player.x == x and player.y == y and player.alive:
                 player.deaths += 1
@@ -162,50 +177,66 @@ async def broadcast(message: dict):
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# Game tick
+# game loop – runs every 10 ms, drains the queue, then broadcasts diff
 # ────────────────────────────────────────────────────────────────────────────
 async def game_loop():
-    global bombs, explosions, updated_cells, updated_players
-
+    tick_ms = 10
     while True:
+        start = now_ms()
+
+        # ── drain queue (non-blocking)
+        try:
+            while True:
+                action, args = action_queue.get_nowait()
+                if action == "move":
+                    (player, dx, dy) = args
+                    handle_move(player, dx, dy)
+                elif action == "bomb":
+                    (player,) = args
+                    handle_bomb(player)
+                elif action == "explode":
+                    (bomb,) = args
+                    if bomb in bombs:
+                        trigger_explosion(bomb)
+                        bombs.remove(bomb)
+        except asyncio.QueueEmpty:
+            pass
+
+        # ── clear expired explosions
         current_time = now_ms()
+        for explosion in explosions:
+            if explosion.clear_at_ms <= current_time:
+                set_cell(explosion.x, explosion.y, Cell.empty)
+                explosions.remove(explosion)
 
-        # Bombs → explosions
-        for bomb in bombs[:]:
-            if bomb.explode_at_ms <= current_time:
-                trigger_explosion(bomb)
-                bombs.remove(bomb)
-
-        # Clear explosion tiles
-        for exp in explosions[:]:
-            if exp.clear_at_ms <= current_time:
-                set_cell(exp.x, exp.y, Cell.empty)
-                explosions.remove(exp)
-
-        # Send diff when something changed
+        # ── broadcast diff if something changed
         if updated_cells or updated_players:
-            diff_message = {
-                "type": "diff",
-                "updatedCells": [
-                    {"x": x, "y": y, "value": grid[y][x]} for (x, y) in updated_cells
-                ],
-                "updatedPlayers": [
-                    player_state_snapshot(players[pid]) for pid in updated_players
-                ],
-            }
-            await broadcast(diff_message)
+            await broadcast(
+                {
+                    "type": "diff",
+                    "updatedCells": [
+                        {"x": x, "y": y, "value": grid[y][x]}
+                        for (x, y) in updated_cells
+                    ],
+                    "updatedPlayers": [
+                        player_state_snapshot(players[pid]) for pid in updated_players
+                    ],
+                }
+            )
             updated_cells.clear()
             updated_players.clear()
 
-        await asyncio.sleep(TICK_MILLISECONDS / 1000)
+        # ── keep 10 ms cadence
+        elapsed = now_ms() - start
+        await asyncio.sleep(max(0, tick_ms - elapsed) / 1000)
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# WebSocket connection handler
+# WebSocket handler – enqueue actions instead of acting directly
 # ────────────────────────────────────────────────────────────────────────────
 async def websocket_handler(websocket):
-    # Expect the first message to be "join"
-    join_request = json.loads(await websocket.recv())
+    data = await websocket.recv()
+    join_request = json.loads(data)
     if join_request.get("type") != "join":
         return
 
@@ -213,20 +244,21 @@ async def websocket_handler(websocket):
     players[new_player.player_id] = new_player
     updated_players.add(new_player.player_id)
 
-    # Send full state to the newcomer
+    # initial snapshot
+    data_to_send = {
+        "type": "init",
+        "playerId": new_player.player_id,
+        "grid": grid,
+        "players": [player_state_snapshot(p) for p in players.values()],
+        "scores": scores_snapshot(),
+    }
+    print(data_to_send)
     await websocket.send(
         json.dumps(
-            {
-                "type": "init",
-                "playerId": new_player.player_id,
-                "grid": grid,
-                "players": [player_state_snapshot(p) for p in players.values()],
-                "scores": scores_snapshot(),
-            },
+            data_to_send,
         )
     )
 
-    # Notify others that a new player arrived
     await broadcast(
         {
             "type": "diff",
@@ -237,11 +269,11 @@ async def websocket_handler(websocket):
 
     try:
         async for raw in websocket:
-            message = json.loads(raw)
-            if message["type"] == "move":
-                handle_move(new_player, message["dx"], message["dy"])
-            elif message["type"] == "bomb":
-                handle_bomb(new_player)
+            msg = json.loads(raw)
+            if msg["type"] == "move":
+                await enqueue("move", new_player, msg["dx"], msg["dy"])
+            elif msg["type"] == "bomb":
+                await enqueue("bomb", new_player)
     finally:
         players.pop(new_player.player_id, None)
         await broadcast(
@@ -249,13 +281,7 @@ async def websocket_handler(websocket):
                 "type": "diff",
                 "updatedCells": [],
                 "updatedPlayers": [
-                    {
-                        "id": new_player.player_id,
-                        "x": new_player.x,
-                        "y": new_player.y,
-                        "color": new_player.color,
-                        "alive": False,
-                    }
+                    {**player_state_snapshot(new_player), "alive": False}
                 ],
             }
         )
@@ -273,16 +299,23 @@ def handle_move(player: Player, dx: int, dy: int):
     updated_players.add(player.player_id)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Bomb placement – schedule timer in the thread pool
+# ────────────────────────────────────────────────────────────────────────────
 def handle_bomb(player: Player):
-    if not player.alive:
-        return
-    if player.active_bombs >= player.max_bombs:
+    if not player.alive or player.active_bombs >= player.max_bombs:
         return
     if grid[player.y][player.x] != Cell.empty:
         return
+
     set_cell(player.x, player.y, Cell.bomb)
-    bombs.append(Bomb(player.x, player.y, player))
+    bomb = Bomb(player.x, player.y, player)
+    bombs.append(bomb)
     player.active_bombs += 1
+
+    # fire-and-forget timer
+    loop = asyncio.get_running_loop()
+    thread_pool.submit(bomb_timer, bomb, loop)
 
 
 # ────────────────────────────────────────────────────────────────────────────

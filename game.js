@@ -113,7 +113,7 @@ function render() {
     players.forEach((p) => {
         if (!p.alive)
             return;
-        context.fillStyle = p.id === myPlayerId ? "#ffffff" : p.color;
+        context.fillStyle = p.color;
         context.fillRect(p.x * TILE_SIZE + 5, p.y * TILE_SIZE + 5, TILE_SIZE - 10, TILE_SIZE - 10);
     });
     requestAnimationFrame(render);
