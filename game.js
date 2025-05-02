@@ -20,59 +20,52 @@ const context = canvas.getContext("2d");
 const buttonPlay = document.getElementById("playOnline");
 const inputColor = document.getElementById("playerColor");
 const scoreboardDiv = document.getElementById("scoreboard");
-const killsSpan = document.getElementById("kills");
-const deathsSpan = document.getElementById("deaths");
-const assistsSpan = document.getElementById("assists");
 /* =========================================================================
      Constants
      ========================================================================= */
 const TILE_SIZE = 35;
-const COLUMNS = 20;
-const ROWS = 18;
 /* =========================================================================
      In-memory state
      ========================================================================= */
 let websocket = null;
 let myPlayerId = "";
-let grid = []; // authoritative grid copy
-const players = new Map(); // all remote players
+let grid = []; // authoritative grid
+const players = new Map();
 /* =========================================================================
-     Networking helpers
+     Networking
      ========================================================================= */
 function send(message) {
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
+    (websocket === null || websocket === void 0 ? void 0 : websocket.readyState) === WebSocket.OPEN &&
         websocket.send(JSON.stringify(message));
-    }
 }
 function connect(color) {
     websocket = new WebSocket("ws://localhost:4000");
     websocket.onopen = () => send({ type: "join", color });
-    websocket.onmessage = (event) => handleServerMessage(JSON.parse(event.data));
-    websocket.onclose = () => alert("Disconnected from server");
-    // hide menu / show game UI
+    websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
+    websocket.onclose = () => alert("Disconnected");
     document.getElementById("menu").style.display = "none";
     scoreboardDiv.style.display = "block";
     canvas.style.display = "block";
 }
 /* =========================================================================
-     Input → intent messages
+     Input → intent
      ========================================================================= */
 window.addEventListener("keydown", (e) => {
-    const moves = {
+    const dir = {
         ArrowUp: [0, -1],
         ArrowDown: [0, 1],
         ArrowLeft: [-1, 0],
         ArrowRight: [1, 0],
     };
-    if (e.key in moves) {
-        const [dx, dy] = moves[e.key];
+    if (e.key in dir) {
+        const [dx, dy] = dir[e.key];
         send({ type: "move", dx, dy });
     }
     if (e.key === " ")
         send({ type: "bomb" });
 });
 /* =========================================================================
-     Server message handling
+     Server handling
      ========================================================================= */
 function handleServerMessage(msg) {
     if (msg.type === "init") {
@@ -80,36 +73,49 @@ function handleServerMessage(msg) {
         grid = msg.grid;
         players.clear();
         msg.players.forEach((p) => players.set(p.id, p));
-        updateScoreboard(msg.scores[myPlayerId]);
+        // canvas size now comes from server grid
+        canvas.width = grid[0].length * TILE_SIZE;
+        canvas.height = grid.length * TILE_SIZE;
+        updateScoreboard(msg.scores);
     }
     else {
         // diff
         msg.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
         msg.updatedPlayers.forEach((p) => players.set(p.id, p));
-        if (msg.scores && msg.scores[myPlayerId])
-            updateScoreboard(msg.scores[myPlayerId]);
+        if (msg.scores)
+            updateScoreboard(msg.scores);
     }
 }
-function updateScoreboard(my) {
-    killsSpan.textContent = String(my.kills);
-    deathsSpan.textContent = String(my.deaths);
-    assistsSpan.textContent = String(my.assists);
+/* =========================================================================
+     Scoreboard (table of all players)
+     ========================================================================= */
+function updateScoreboard(all) {
+    const rows = Object.entries(all)
+        .sort(([, a], [, b]) => b.kills - a.kills) // simple sort by kills
+        .map(([id, s]) => {
+        var _a, _b;
+        return `<tr>
+           <td style="color:${(_b = (_a = players.get(id)) === null || _a === void 0 ? void 0 : _a.color) !== null && _b !== void 0 ? _b : "#fff"}">${id === myPlayerId ? "(you)" : id}</td>
+           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${s.assists}</td>
+         </tr>`;
+    })
+        .join("");
+    scoreboardDiv.innerHTML = `<table>
+         <thead><tr><th>Player</th><th>K</th><th>D</th><th>A</th></tr></thead>
+         <tbody>${rows}</tbody>
+       </table>`;
 }
 /* =========================================================================
      Rendering
      ========================================================================= */
-canvas.width = COLUMNS * TILE_SIZE;
-canvas.height = ROWS * TILE_SIZE;
 function render() {
-    var _a, _b;
-    // tiles
-    for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLUMNS; x++) {
-            context.fillStyle = tileColor((_b = (_a = grid[y]) === null || _a === void 0 ? void 0 : _a[x]) !== null && _b !== void 0 ? _b : Cell.empty);
+    if (!grid.length)
+        return requestAnimationFrame(render); // not ready yet
+    for (let y = 0; y < grid.length; y++)
+        for (let x = 0; x < grid[0].length; x++) {
+            context.fillStyle = tileColor(grid[y][x]);
             context.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
         }
-    }
-    // players
     players.forEach((p) => {
         if (!p.alive)
             return;
@@ -118,8 +124,8 @@ function render() {
     });
     requestAnimationFrame(render);
 }
-function tileColor(cell) {
-    switch (cell) {
+function tileColor(t) {
+    switch (t) {
         case Cell.wall:
             return "gray";
         case Cell.crate:

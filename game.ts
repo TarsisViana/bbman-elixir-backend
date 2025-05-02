@@ -11,6 +11,7 @@ enum Cell {
   powerupBomb,
 }
 
+/* ---------------- messages sent → server ---------------- */
 interface MessageJoin {
   type: "join";
   color: string;
@@ -25,6 +26,7 @@ interface MessageBomb {
 }
 type ClientMessage = MessageJoin | MessageMove | MessageBomb;
 
+/* ---------------- messages received ← server ------------ */
 interface PlayerState {
   id: string;
   x: number;
@@ -61,65 +63,58 @@ const context = canvas.getContext("2d")!;
 const buttonPlay = document.getElementById("playOnline") as HTMLButtonElement;
 const inputColor = document.getElementById("playerColor") as HTMLInputElement;
 const scoreboardDiv = document.getElementById("scoreboard") as HTMLDivElement;
-const killsSpan = document.getElementById("kills") as HTMLSpanElement;
-const deathsSpan = document.getElementById("deaths") as HTMLSpanElement;
-const assistsSpan = document.getElementById("assists") as HTMLSpanElement;
 
 /* =========================================================================
      Constants
      ========================================================================= */
 const TILE_SIZE = 35;
-const COLUMNS = 20;
-const ROWS = 18;
 
 /* =========================================================================
      In-memory state
      ========================================================================= */
 let websocket: WebSocket | null = null;
 let myPlayerId = "";
-let grid: Cell[][] = []; // authoritative grid copy
-const players = new Map<string, PlayerState>(); // all remote players
+let grid: Cell[][] = []; // authoritative grid
+const players = new Map<string, PlayerState>();
 
 /* =========================================================================
-     Networking helpers
+     Networking
      ========================================================================= */
 function send(message: ClientMessage) {
-  if (websocket && websocket.readyState === WebSocket.OPEN) {
+  websocket?.readyState === WebSocket.OPEN &&
     websocket.send(JSON.stringify(message));
-  }
 }
 
 function connect(color: string) {
   websocket = new WebSocket("ws://localhost:4000");
   websocket.onopen = () => send({ type: "join", color });
-  websocket.onmessage = (event) => handleServerMessage(JSON.parse(event.data));
-  websocket.onclose = () => alert("Disconnected from server");
+  websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
+  websocket.onclose = () => alert("Disconnected");
 
-  // hide menu / show game UI
   document.getElementById("menu")!.style.display = "none";
   scoreboardDiv.style.display = "block";
   canvas.style.display = "block";
 }
 
 /* =========================================================================
-     Input → intent messages
+     Input → intent
      ========================================================================= */
 window.addEventListener("keydown", (e) => {
-  const moves: Record<string, [number, number]> = {
+  const dir: Record<string, [number, number]> = {
     ArrowUp: [0, -1],
     ArrowDown: [0, 1],
     ArrowLeft: [-1, 0],
     ArrowRight: [1, 0],
   };
-  if (e.key in moves) {
-    const [dx, dy] = moves[e.key];
+  if (e.key in dir) {
+    const [dx, dy] = dir[e.key];
     send({ type: "move", dx, dy });
   }
   if (e.key === " ") send({ type: "bomb" });
 });
 
 /* =========================================================================
-     Server message handling
+     Server handling
      ========================================================================= */
 function handleServerMessage(msg: ServerMessage) {
   if (msg.type === "init") {
@@ -127,40 +122,56 @@ function handleServerMessage(msg: ServerMessage) {
     grid = msg.grid;
     players.clear();
     msg.players.forEach((p) => players.set(p.id, p));
-    updateScoreboard(msg.scores[myPlayerId]);
+
+    // canvas size now comes from server grid
+    canvas.width = grid[0].length * TILE_SIZE;
+    canvas.height = grid.length * TILE_SIZE;
+
+    updateScoreboard(msg.scores);
   } else {
     // diff
     msg.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
     msg.updatedPlayers.forEach((p) => players.set(p.id, p));
-    if (msg.scores && msg.scores[myPlayerId])
-      updateScoreboard(msg.scores[myPlayerId]);
+    if (msg.scores) updateScoreboard(msg.scores);
   }
 }
 
-function updateScoreboard(my: ScoreState) {
-  killsSpan.textContent = String(my.kills);
-  deathsSpan.textContent = String(my.deaths);
-  assistsSpan.textContent = String(my.assists);
+/* =========================================================================
+     Scoreboard (table of all players)
+     ========================================================================= */
+function updateScoreboard(all: Record<string, ScoreState>) {
+  const rows = Object.entries(all)
+    .sort(([, a], [, b]) => b.kills - a.kills) // simple sort by kills
+    .map(
+      ([id, s]) =>
+        `<tr>
+           <td style="color:${players.get(id)?.color ?? "#fff"}">${
+          id === myPlayerId ? "(you)" : id
+        }</td>
+           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${s.assists}</td>
+         </tr>`
+    )
+    .join("");
+  scoreboardDiv.innerHTML = `<table>
+         <thead><tr><th>Player</th><th>K</th><th>D</th><th>A</th></tr></thead>
+         <tbody>${rows}</tbody>
+       </table>`;
 }
 
 /* =========================================================================
      Rendering
      ========================================================================= */
-canvas.width = COLUMNS * TILE_SIZE;
-canvas.height = ROWS * TILE_SIZE;
-
 function render() {
-  // tiles
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLUMNS; x++) {
-      context.fillStyle = tileColor(grid[y]?.[x] ?? Cell.empty);
+  if (!grid.length) return requestAnimationFrame(render); // not ready yet
+
+  for (let y = 0; y < grid.length; y++)
+    for (let x = 0; x < grid[0].length; x++) {
+      context.fillStyle = tileColor(grid[y][x]);
       context.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
-  }
-  // players
+
   players.forEach((p) => {
     if (!p.alive) return;
-
     context.fillStyle = p.color;
     context.fillRect(
       p.x * TILE_SIZE + 5,
@@ -173,8 +184,8 @@ function render() {
   requestAnimationFrame(render);
 }
 
-function tileColor(cell: Cell): string {
-  switch (cell) {
+function tileColor(t: Cell): string {
+  switch (t) {
     case Cell.wall:
       return "gray";
     case Cell.crate:
