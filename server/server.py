@@ -11,6 +11,7 @@ TICK_MS = 50
 BOMB_FUSE_MS = 2000
 EXPLOSION_MS = 500
 RESPAWN_MS = 5000
+CRATE_REFILL_MS = 20_000
 
 
 class Cell:
@@ -78,8 +79,9 @@ class Bomb:
 
 
 class Explosion:
-    def __init__(self, x: int, y: int):
+    def __init__(self, x: int, y: int, restore_to: Cell):
         self.x, self.y = x, y
+        self.restore_to = restore_to
         self.clear_at = now_ms() + EXPLOSION_MS
 
 
@@ -95,11 +97,33 @@ updated_cells: Collection[Tuple[int, int]] = set()
 updated_players: Collection[str] = set()
 
 thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+last_refill = now_ms()
 
 
 # ────────────────────────────────────────────────────────────────────────────
 # Mechanics
 # ────────────────────────────────────────────────────────────────────────────
+def maybe_refill_crates():
+    # refill if less than %
+    global last_refill
+    if now_ms() - last_refill < CRATE_REFILL_MS:
+        return
+    amount_of_crates = sum(row.count(Cell.crate) for row in grid)
+    if amount_of_crates >= (COLUMNS * ROWS * 0.10):
+        last_refill = now_ms()
+        return
+
+    desired_amount_of_crates = int(COLUMNS * ROWS * 0.20)
+    for _ in range(desired_amount_of_crates - amount_of_crates):
+        x, y = random.randrange(1, COLUMNS - 1), random.randrange(1, ROWS - 1)
+        if grid[y][x] == Cell.empty and all(
+            (p.x, p.y) != (x, y) for p in players.values()
+        ):
+            set_cell(x, y, Cell.crate)
+            amount_of_crates += 1
+    last_refill = now_ms()
+
+
 def set_cell(x: int, y: int, c: int):
     if in_bounds(x, y) and grid[y][x] != c:
         grid[y][x] = c
@@ -123,9 +147,10 @@ def explode_bomb(bomb: Bomb):
             if not in_bounds(nx, ny) or grid[ny][nx] == Cell.wall:
                 break
 
+            cell_before = grid[ny][nx]
             blast([(nx, ny)], owner)
 
-            if grid[ny][nx] in (Cell.crate, Cell.bomb):
+            if cell_before in (Cell.crate, Cell.bomb):
                 break
 
 
@@ -137,9 +162,20 @@ def blast(cells: Sequence[Tuple[int, int]], owner: Player):
                     # will explode other bombs on the range
                     bb.explode_at = now_ms()
 
-        set_cell(x, y, Cell.explosion)
+        old = grid[y][x]
+        # decide what should re-appear after the flame
+        if old == Cell.crate:
+            r = random.random()
+            restore = (
+                Cell.powerup_fire
+                if r < 0.10
+                else Cell.powerup_bomb if r < 0.20 else Cell.empty
+            )
+        else:
+            restore = Cell.empty
 
-        explosions.append(Explosion(x, y))
+        set_cell(x, y, Cell.explosion)
+        explosions.append(Explosion(x, y, restore))
 
         for pl in players.values():
             if pl.alive and pl.x == x and pl.y == y:
@@ -180,10 +216,23 @@ def handle_move(pl: Player, dx: int, dy: int):
         return
 
     nx, ny = pl.x + dx, pl.y + dy
-    if not in_bounds(nx, ny) or grid[ny][nx] != Cell.empty:
+    if (
+        not in_bounds(nx, ny)
+        or grid[ny][nx] == Cell.wall
+        or grid[ny][nx] == Cell.bomb
+        or grid[ny][nx] == Cell.crate
+    ):
         return
 
+    cell = grid[ny][nx]
     pl.x, pl.y = nx, ny
+
+    if cell == Cell.powerup_fire:
+        pl.fire_power += 1
+        set_cell(nx, ny, Cell.empty)
+    elif cell == Cell.powerup_bomb:
+        pl.max_bombs += 1
+        set_cell(nx, ny, Cell.empty)
 
     updated_players.add(pl.id)
 
@@ -212,18 +261,20 @@ def respawn_handler(pl: Player):
 # ────────────────────────────────────────────────────────────────────────────
 async def game_loop():
     while True:
-        started_proocessing_loop_at = now_ms()
+        started_process_at = now_ms()
 
         # time-outs
         for b in bombs:
-            if b.explode_at <= started_proocessing_loop_at:
+            if b.explode_at <= started_process_at:
                 explode_bomb(b)
                 bombs.remove(b)
 
         for e in explosions:
-            if e.clear_at <= started_proocessing_loop_at:
-                set_cell(e.x, e.y, Cell.empty)
+            if e.clear_at <= started_process_at:
+                set_cell(e.x, e.y, e.restore_to)
                 explosions.remove(e)
+
+        maybe_refill_crates()
 
         # broadcast diff
         if updated_cells or updated_players:
@@ -243,7 +294,7 @@ async def game_loop():
             updated_cells.clear()
             updated_players.clear()
 
-        await asyncio.sleep(max(0, (TICK_MS - (now_ms() - started_proocessing_loop_at))) / 1000)
+        await asyncio.sleep(max(0, (TICK_MS - (now_ms() - started_process_at))) / 1000)
 
 
 # ────────────────────────────────────────────────────────────────────────────
