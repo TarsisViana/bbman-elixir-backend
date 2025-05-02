@@ -8,7 +8,6 @@ import websockets.asyncio.client
 # ────────────────────────────────────────────────────────────────────────────
 COLUMNS, ROWS = 31, 25
 TICK_MS = 50
-MOVE_COOLDOWN_MS = 150
 BOMB_FUSE_MS = 2000
 EXPLOSION_MS = 500
 RESPAWN_MS = 5000
@@ -31,6 +30,7 @@ def in_bounds(x: int, y: int) -> bool:
 
 def build_grid() -> Sequence[Sequence[int]]:
     g: Sequence[Sequence[int]] = []
+
     for y in range(ROWS):
         row = []
         for x in range(COLUMNS):
@@ -68,7 +68,6 @@ class Player:
         self.max_bombs = 1
         self.active_bombs = 0
         self.kills = self.deaths = self.assists = 0
-        self.last_move = 0
 
 
 class Bomb:
@@ -111,16 +110,16 @@ def schedule_respawn(player: Player):
     thread_pool.submit(lambda: (time.sleep(RESPAWN_MS / 1000), respawn_handler(player)))
 
 
-def explode_bomb(b: Bomb):
+def explode_bomb(bomb: Bomb):
     # iterate over all cells the bomb is blasting through, and act upon it
-    owner = b.owner
+    owner = bomb.owner
     owner.active_bombs -= 1
 
-    blast([(b.x, b.y)], owner)
+    blast([(bomb.x, bomb.y)], owner)
 
     for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
         for i in range(1, owner.fire_power + 1):
-            nx, ny = b.x + dx * i, b.y + dy * i
+            nx, ny = bomb.x + dx * i, bomb.y + dy * i
             if not in_bounds(nx, ny) or grid[ny][nx] == Cell.wall:
                 break
 
@@ -150,6 +149,7 @@ def blast(cells: Sequence[Tuple[int, int]], owner: Player):
                 if pl is not owner:
                     owner.kills += 1
                 updated_players.update([pl.id, owner.id])
+
                 # agenda a ressureição
                 schedule_respawn(pl)
 
@@ -168,7 +168,7 @@ def snapshot_scores() -> dict:
 async def broadcast(msg: dict):
     if not players:
         return
-    data = json.dumps(msg, separators=(",", ":"))
+    data = json.dumps(msg)
     await asyncio.gather(*(pl.ws.send(data) for pl in players.values()))
 
 
@@ -178,21 +178,23 @@ async def broadcast(msg: dict):
 def handle_move(pl: Player, dx: int, dy: int):
     if not pl.alive:
         return
-    if now_ms() - pl.last_move < MOVE_COOLDOWN_MS:
-        return
+
     nx, ny = pl.x + dx, pl.y + dy
     if not in_bounds(nx, ny) or grid[ny][nx] != Cell.empty:
         return
+
     pl.x, pl.y = nx, ny
-    pl.last_move = now_ms()
+
     updated_players.add(pl.id)
 
 
 def handle_bomb(pl: Player):
     if not pl.alive or pl.active_bombs >= pl.max_bombs:
         return
+
     if grid[pl.y][pl.x] != Cell.empty:
         return
+
     set_cell(pl.x, pl.y, Cell.bomb)
     b = Bomb(pl.x, pl.y, pl)
     bombs.append(b)
@@ -210,16 +212,16 @@ def respawn_handler(pl: Player):
 # ────────────────────────────────────────────────────────────────────────────
 async def game_loop():
     while True:
-        start = now_ms()
+        started_proocessing_loop_at = now_ms()
 
         # time-outs
-        for b in bombs[:]:
-            if b.explode_at <= start:
+        for b in bombs:
+            if b.explode_at <= started_proocessing_loop_at:
                 explode_bomb(b)
                 bombs.remove(b)
 
-        for e in explosions[:]:
-            if e.clear_at <= start:
+        for e in explosions:
+            if e.clear_at <= started_proocessing_loop_at:
                 set_cell(e.x, e.y, Cell.empty)
                 explosions.remove(e)
 
@@ -241,13 +243,13 @@ async def game_loop():
             updated_cells.clear()
             updated_players.clear()
 
-        await asyncio.sleep(max(0, (TICK_MS - (now_ms() - start))) / 1000)
+        await asyncio.sleep(max(0, (TICK_MS - (now_ms() - started_proocessing_loop_at))) / 1000)
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# WebSocket handler
+# Player handler
 # ────────────────────────────────────────────────────────────────────────────
-async def ws_handler(ws: websockets):
+async def player_handler(ws: websockets):
     first = json.loads(await ws.recv())
     if first.get("type") != "join":
         return
@@ -302,7 +304,8 @@ async def ws_handler(ws: websockets):
 # ────────────────────────────────────────────────────────────────────────────
 async def main():
     asyncio.create_task(game_loop())
-    async with websockets.serve(ws_handler, "0.0.0.0", 4000, max_queue=None):
+
+    async with websockets.serve(player_handler, "0.0.0.0", 4000, max_queue=None):
         print("Bomberman server on ws://localhost:4000")
         await asyncio.Future()
 

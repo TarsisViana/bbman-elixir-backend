@@ -34,6 +34,7 @@ interface PlayerState {
   color: string;
   alive: boolean;
 }
+
 interface ScoreState {
   kills: number;
   deaths: number;
@@ -74,7 +75,7 @@ const TILE_SIZE = 35;
      ========================================================================= */
 let websocket: WebSocket | null = null;
 let myPlayerId = "";
-let grid: Cell[][] = []; // authoritative grid
+let grid: Cell[][] = [];
 const players = new Map<string, PlayerState>();
 
 /* =========================================================================
@@ -148,7 +149,9 @@ function updateScoreboard(all: Record<string, ScoreState>) {
            <td style="color:${players.get(id)?.color ?? "#fff"}">${
           id === myPlayerId ? "(you)" : id
         }</td>
-           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${s.assists}</td>
+           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${
+          s.assists
+        }</td>
          </tr>`
     )
     .join("");
@@ -162,7 +165,7 @@ function updateScoreboard(all: Record<string, ScoreState>) {
      Rendering
      ========================================================================= */
 function render() {
-  if (!grid.length) return requestAnimationFrame(render); // not ready yet
+  if (!grid.length) return requestAnimationFrame(render);
 
   for (let y = 0; y < grid.length; y++)
     for (let x = 0; x < grid[0].length; x++) {

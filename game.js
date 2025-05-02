@@ -29,7 +29,7 @@ const TILE_SIZE = 35;
      ========================================================================= */
 let websocket = null;
 let myPlayerId = "";
-let grid = []; // authoritative grid
+let grid = [];
 const players = new Map();
 /* =========================================================================
      Networking
@@ -110,7 +110,7 @@ function updateScoreboard(all) {
      ========================================================================= */
 function render() {
     if (!grid.length)
-        return requestAnimationFrame(render); // not ready yet
+        return requestAnimationFrame(render);
     for (let y = 0; y < grid.length; y++)
         for (let x = 0; x < grid[0].length; x++) {
             context.fillStyle = tileColor(grid[y][x]);
