@@ -7,7 +7,7 @@ WORKDIR /app
 
 COPY . ./
 
-RUN pip install websockets -y
+RUN pip install websockets
 
 EXPOSE 8080
 ENTRYPOINT python server/server.py
