@@ -14,9 +14,18 @@
 <body>
   <div id="menu">
     <label for="color">Choose your color:</label>
-    <input type="color" id="playerColor" value="#e6194b" />
+    <input type="color" id="playerColor">
+
+    <script>
+        const randomHex = '#' + Math.floor(Math.random() * 0xFFFFFF)
+                            .toString(16)
+                            .padStart(6, '0');
+
+        const picker = document.getElementById('playerColor');
+        picker.value = randomHex;
+        picker.setAttribute('value', randomHex);
+    </script>
     <br />
-    <!-- <button id="withBots">Play vs Bots</button> -->
     <button id="playOnline">Play online</button>
 
   </div>

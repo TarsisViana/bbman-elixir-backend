@@ -9,7 +9,7 @@ npm install typescript --save-dev
 npx tsc --init
 ```
 
-2. Compile
+2. Compile and Monitor changes
 ```bash
-npx tsc
+npm run monitor
 ```
