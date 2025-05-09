@@ -87,7 +87,7 @@ function send(message: ClientMessage) {
 }
 
 function connect(color: string) {
-  websocket = new WebSocket("ws://ec2-15-228-74-187.sa-east-1.compute.amazonaws.com:4000");
+  websocket = new WebSocket("http://localhost:4000");
   websocket.onopen = () => send({ type: "join", color });
   websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
   websocket.onclose = () => alert("Disconnected");
@@ -146,11 +146,9 @@ function updateScoreboard(all: Record<string, ScoreState>) {
     .map(
       ([id, s]) =>
         `<tr>
-           <td style="color:${players.get(id)?.color ?? "#fff"}">${
-          id === myPlayerId ? "(you)" : id
+           <td style="color:${players.get(id)?.color ?? "#fff"}">${id === myPlayerId ? "(you)" : id
         }</td>
-           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${
-          s.assists
+           <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${s.assists
         }</td>
          </tr>`
     )

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bomberman WS Test</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 50px;
+    }
+
+    button {
+      font-size: 18px;
+      padding: 10px 20px;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Bomberman WebSocket Test</h1>
+  <button id="connectBtn">Connect to Game</button>
+  <div id="status">Not connected</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/phoenix@1.7.9/priv/static/phoenix.js"></script>
+  <script>
+    const socketUrl = "ws://localhost:4000/socket";
+    const connectBtn = document.getElementById("connectBtn");
+    const statusEl = document.getElementById("status");
+
+    let socket = null;
+    let channel = null;
+
+    connectBtn.addEventListener("click", () => {
+      if (channel) {
+        statusEl.textContent = "Already connected.";
+        return;
+      }
+
+      socket = new Phoenix.Socket(socketUrl, {
+        params: { color: "#FF0000" }  // sample color
+      });
+
+      socket.connect();
+
+      channel = socket.channel("game:lobby", { color: "#FF0000" });
+
+      channel.join()
+        .receive("ok", resp => {
+          statusEl.textContent = "Connected! Player ID: " + resp.playerId;
+          console.log("JOINED successfully", resp);
+        })
+        .receive("error", resp => {
+          statusEl.textContent = "Join failed.";
+          console.error("Unable to join", resp);
+        });
+
+      channel.on("diff", payload => {
+        console.log("Game update:", payload);
+      });
+    });
+  </script>
+
+</body>
+</html>

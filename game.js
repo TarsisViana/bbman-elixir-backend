@@ -39,7 +39,7 @@ function send(message) {
         websocket.send(JSON.stringify(message));
 }
 function connect(color) {
-    websocket = new WebSocket("ws://ec2-15-228-74-187.sa-east-1.compute.amazonaws.com:4000");
+    websocket = new WebSocket("http//:localhost:4000");
     websocket.onopen = () => send({ type: "join", color });
     websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
     websocket.onclose = () => alert("Disconnected");
