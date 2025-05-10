@@ -16,7 +16,9 @@ defmodule ElxServer.Application do
       # Start a worker by calling: ElxServer.Worker.start_link(arg)
       # {ElxServer.Worker, arg},
       # Start to serve requests, typically the last entry
-      ElxServerWeb.Endpoint
+      ElxServerWeb.Endpoint,
+      # start the server
+      {ElxServer.GameServer, []}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

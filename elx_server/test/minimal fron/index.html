@@ -55,7 +55,6 @@
 
       channel.join()
         .receive("ok", resp => {
-          statusEl.textContent = "Connected! Player ID: " + resp.playerId;
           console.log("JOINED successfully", resp);
         })
         .receive("error", resp => {
@@ -65,6 +64,10 @@
 
       channel.on("diff", payload => {
         console.log("Game update:", payload);
+      });
+      channel.on("init", res => {
+        statusEl.textContent = "Connected! Player ID: " + res.playerId;
+        console.log(res)
       });
     });
   </script>
