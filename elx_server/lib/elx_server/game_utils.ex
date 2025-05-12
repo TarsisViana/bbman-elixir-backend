@@ -38,4 +38,27 @@ defmodule ElxServer.GameUtils do
 
   defp border?(x, y), do: x in [0, @columns - 1] or y in [0, @rows - 1]
   defp pillar?(x, y), do: rem(x, 2) == 0 and rem(y, 2) == 0
+
+  def find_free_spawn(grid, players) do
+    taken =
+      Map.values(players)
+      |> Enum.filter(fn player -> player.alive end)
+      |> Enum.map(fn player -> %{x: player.x, y: player.y} end)
+
+    loop_recursive(grid, taken, 100)
+  end
+
+  defp loop_recursive(_grid, _taken, 0), do: {:error, :no_spawn_available}
+
+  defp loop_recursive(grid, taken, attempts) do
+    x = Enum.random(1..(@columns - 2))
+    y = Enum.random(1..(@rows - 2))
+    cell = grid |> Map.get({x, y})
+
+    if cell == :empty and {x, y} not in taken do
+      %{x: x, y: y}
+    else
+      loop_recursive(grid, taken, attempts - 1)
+    end
+  end
 end

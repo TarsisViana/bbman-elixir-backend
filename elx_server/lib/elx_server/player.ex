@@ -1,4 +1,7 @@
 defmodule ElxServer.Player do
+  alias ElxServer.GameUtils
+
+  @derive Jason.Encoder
   defstruct [
     :id,
     :x,
@@ -12,4 +15,15 @@ defmodule ElxServer.Player do
     deaths: 0,
     assists: 0
   ]
+
+  def create(color, grid, players) do
+    %{x: x, y: y} = GameUtils.find_free_spawn(grid, players)
+
+    %__MODULE__{
+      id: UUID.uuid4(),
+      x: x,
+      y: y,
+      color: color
+    }
+  end
 end

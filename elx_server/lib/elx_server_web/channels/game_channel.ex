@@ -2,32 +2,39 @@ defmodule ElxServerWeb.GameChannel do
   use ElxServerWeb, :channel
 
   alias ElxServer.GameServer
+  alias ElxServer.GameUtils
 
   def join("game:lobby", %{"color" => color}, socket) do
-    player_id = UUID.uuid4()
-    # make function to create player passing player_id and color
+    {:ok, player_id} = GameServer.new_player(color)
     send(self(), :after_join)
     {:ok, assign(socket, :player_id, player_id)}
   end
 
   def handle_info(:after_join, socket) do
-    player_id = socket.assigns.player_id
-    grid = GameServer.get_grid() |> format_grid_for_client()
+    grid = GameServer.get_grid()
+    players = GameServer.get_players()
 
     push(socket, "init", %{
-      "playerId" => player_id,
-      "grid" => grid,
-      "players" => "get players",
+      "playerId" => socket.assigns.player_id,
+      "grid" => grid |> format_grid_for_client(),
+      "players" => players |> format_players_for_client(),
       "score" => "get score"
     })
 
     {:noreply, socket}
   end
 
-  def format_grid_for_client(grid) do
+  defp format_grid_for_client(grid) do
     grid
     |> Enum.map(fn {{x, y}, cell} ->
       %{"x" => x, "y" => y, "value" => cell}
+    end)
+  end
+
+  defp format_players_for_client(players) do
+    players
+    |> Enum.map(fn {id, player} ->
+      %{"id" => id, "player" => player}
     end)
   end
 end
