@@ -8,8 +8,11 @@ defmodule ElxServer.GameServer do
   end
 
   defmodule State do
-    defstruct grid: %{}, players: %{}
+    defstruct grid: %{},
+              players: %{}
   end
+
+  # Handler functions
 
   def init(_) do
     grid = GameUtils.build_grid()
@@ -25,11 +28,30 @@ defmodule ElxServer.GameServer do
     {:reply, state.players, state}
   end
 
-  def handle_call({:new_player, color}, _from, state) do
+  def handle_call({:add_player, color}, _from, state) do
     player = Player.create(color, state.grid, state.players)
     updated_players = Map.put(state.players, player.id, player)
     {:reply, %{player_id: player.id}, %State{state | players: updated_players}}
   end
+
+  def handle_call(:snapshot_scores, _from, state) do
+    scores =
+      state.players
+      |> Enum.into(%{}, fn {id, player} ->
+        {
+          "#{id}",
+          %{
+            kills: player.kills,
+            deaths: player.deaths,
+            assists: player.assists
+          }
+        }
+      end)
+
+    {:reply, scores, state}
+  end
+
+  # Wrappers
 
   def get_grid do
     GenServer.call(__MODULE__, :get_grid)
@@ -39,8 +61,12 @@ defmodule ElxServer.GameServer do
     GenServer.call(__MODULE__, :get_players)
   end
 
-  def new_player(color) do
-    player_id = GenServer.call(__MODULE__, {:new_player, color})
+  def add_player(color) do
+    player_id = GenServer.call(__MODULE__, {:add_player, color})
     {:ok, player_id}
+  end
+
+  def snapshot_scores() do
+    GenServer.call(__MODULE__, :snapshot_scores)
   end
 end
