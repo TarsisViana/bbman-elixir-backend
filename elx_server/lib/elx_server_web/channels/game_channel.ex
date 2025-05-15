@@ -12,17 +12,18 @@ defmodule ElxServerWeb.GameChannel do
 
   def handle_info(:after_join, socket) do
     grid = GameServer.get_grid()
-    players = GameServer.get_players()
+    players = GameServer.snapshot_players()
     score = GameServer.snapshot_scores()
 
-    IO.inspect(socket.assigns)
+    IO.inspect(GameServer.snapshot_players())
 
     push(socket, "init", %{
+      "type" => "init",
       "playerId" => socket.assigns.player_id,
       "grid" => grid |> format_grid_for_client(),
       "gridSize" => GameUtils.get_grid_size(),
-      "players" => players |> format_players_for_client(),
-      "score" => score
+      "players" => players,
+      "scores" => score
     })
 
     {:noreply, socket}
@@ -32,13 +33,6 @@ defmodule ElxServerWeb.GameChannel do
     grid
     |> Enum.map(fn {{x, y}, cell} ->
       %{"x" => x, "y" => y, "value" => cell}
-    end)
-  end
-
-  defp format_players_for_client(players) do
-    players
-    |> Enum.map(fn {id, player} ->
-      %{"id" => id, "player" => player}
     end)
   end
 end

@@ -12,6 +12,7 @@ enum Cell {
   powerupFirePower,
   powerupBomb,
 }
+type Grid = { x: number, y: number, value: Cell }[]
 
 /* ---------------- messages sent → server ---------------- */
 interface MessageJoin {
@@ -46,7 +47,8 @@ interface ScoreState {
 interface MessageInit {
   type: "init";
   playerId: string;
-  grid: Cell[][];
+  grid: Grid;
+  gridSize: number[];
   players: PlayerState[];
   scores: Record<string, ScoreState>;
 }
@@ -78,11 +80,11 @@ const TILE_SIZE = 25;
 let websocket: Socket | null = null;
 let channel: Channel | null = null;
 let myPlayerId = "";
-let grid: Cell[][] = [];
+let grid: Grid = [];
 let collumns = 0
 let rows = 0
 const players = new Map<string, PlayerState>();
-const flatGrid = new Map<string, string>()
+const flatGrid = new Map<string, number>()
 
 /* =========================================================================
      Networking
@@ -140,9 +142,9 @@ window.addEventListener("keydown", (e) => {
 /* =========================================================================
      Server handling
      ========================================================================= */
-function handleServerMessage(msg, payload) {
+function handleServerMessage(msg: string, payload: ServerMessage) {
   console.log(msg, payload)
-  if (msg === "init") {
+  if (msg === "init" && payload.type == "init") {
     myPlayerId = payload.playerId;
     grid = payload.grid;
     grid.forEach(({ x, y, value }) => {
@@ -150,20 +152,20 @@ function handleServerMessage(msg, payload) {
     });
     [rows, collumns] = payload.gridSize
     players.clear();
-    payload.players.forEach((p) => players.set(p.id, p.player));
+    payload.players.forEach((p) => players.set(p.id, p));
 
     // canvas size now comes from server grid
     canvas.width = payload.gridSize[1] * TILE_SIZE;
     canvas.height = payload.gridSize[0] * TILE_SIZE;
 
-    updateScoreboard(payload.score);
+    updateScoreboard(payload.scores);
     return payload
 
-  } else if (msg === "diff") {
+  } else if (payload.type === "diff") {
     // diff
-    msg.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
-    msg.updatedPlayers.forEach((p) => players.set(p.id, p));
-    if (msg.scores) updateScoreboard(msg.scores);
+    payload.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
+    payload.updatedPlayers.forEach((p) => players.set(p.id, p));
+    if (payload.scores) updateScoreboard(payload.scores);
 
     return undefined
   }
@@ -180,7 +182,6 @@ function updateScoreboard(all: Record<string, ScoreState>) {
     .sort(([, a], [, b]) => b.kills - a.kills) // simple sort by kills
     .map(
       ([id, s]) => {
-        console.log(myPlayerId)
         return (`<tr>
            <td style="color:${players.get(id)?.color ?? "#fff"}">${id === myPlayerId ? "(you)" : id.slice(0, 5)
           }</td>
@@ -205,7 +206,7 @@ function render() {
   // Draw grid tiles
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < collumns; x++) {
-      const cellType = flatGrid.get(`${x},${y}`) || "empty";
+      const cellType = flatGrid.get(`${x},${y}`) || 0;
       context.fillStyle = tileColor(cellType);
       context.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }

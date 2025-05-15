@@ -52,11 +52,7 @@ defmodule ElxServer.GameServer do
   end
 
   def handle_call(:snapshot_players, _from, state) do
-    players =
-      state.players
-      |> Enum.into(%{}, fn {id, player} ->
-        {id, Player.snapshot(player)}
-      end)
+    players = Enum.map(state.players, fn {_id, player} -> player end)
 
     {:reply, players, state}
   end
