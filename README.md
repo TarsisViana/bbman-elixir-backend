@@ -1,4 +1,4 @@
-# Simple Bomberman w/ Bots
+# Simple Bomberman 
 
 ## Setup
 

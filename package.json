@@ -3,14 +3,20 @@
   "version": "1.0.0",
   "description": "## Setup",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "monitor":"npx tsc -p . -w"
+    "monitor": "npx tsc -p . -w"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "@types/phoenix": "^1.6.6",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "phoenix": "^1.7.21"
   }
 }

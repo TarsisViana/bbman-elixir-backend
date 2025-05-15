@@ -1,3 +1,5 @@
+import { Socket, Channel } from "phoenix"
+
 /* =========================================================================
    Shared enums / structures – keep identical on client and server
    ========================================================================= */
@@ -68,15 +70,19 @@ const scoreboardDiv = document.getElementById("scoreboard") as HTMLDivElement;
 /* =========================================================================
      Constants
      ========================================================================= */
-const TILE_SIZE = 35;
+const TILE_SIZE = 25;
 
 /* =========================================================================
      In-memory state
      ========================================================================= */
-let websocket: WebSocket | null = null;
+let websocket: Socket | null = null;
+let channel: Channel | null = null;
 let myPlayerId = "";
 let grid: Cell[][] = [];
+let collumns = 0
+let rows = 0
 const players = new Map<string, PlayerState>();
+const flatGrid = new Map<string, string>()
 
 /* =========================================================================
      Networking
@@ -87,10 +93,27 @@ function send(message: ClientMessage) {
 }
 
 function connect(color: string) {
-  websocket = new WebSocket("http://localhost:4000");
-  websocket.onopen = () => send({ type: "join", color });
-  websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
-  websocket.onclose = () => alert("Disconnected");
+  websocket = new Socket("ws://localhost:4000/socket");
+  websocket.connect()
+
+  channel = websocket.channel("game:lobby", { color: color });
+
+  channel.join()
+    .receive("ok", res => {
+      console.log("JOINED successfully");
+    }).receive("error", res => {
+      console.error("Unable to join", res);
+    });
+
+  channel.on("init", res => {
+    console.log(res)
+  });
+
+  channel.onMessage = handleServerMessage
+
+  // websocket.onopen = () => send({ type: "join", color });
+  // websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
+  // websocket.onclose = () => alert("Disconnected");
 
   document.getElementById("menu")!.style.display = "none";
   scoreboardDiv.style.display = "block";
@@ -117,41 +140,54 @@ window.addEventListener("keydown", (e) => {
 /* =========================================================================
      Server handling
      ========================================================================= */
-function handleServerMessage(msg: ServerMessage) {
-  if (msg.type === "init") {
-    myPlayerId = msg.playerId;
-    grid = msg.grid;
+function handleServerMessage(msg, payload) {
+  console.log(msg, payload)
+  if (msg === "init") {
+    myPlayerId = payload.playerId;
+    grid = payload.grid;
+    grid.forEach(({ x, y, value }) => {
+      flatGrid.set(`${x},${y}`, value);
+    });
+    [rows, collumns] = payload.gridSize
     players.clear();
-    msg.players.forEach((p) => players.set(p.id, p));
+    payload.players.forEach((p) => players.set(p.id, p.player));
 
     // canvas size now comes from server grid
-    canvas.width = grid[0].length * TILE_SIZE;
-    canvas.height = grid.length * TILE_SIZE;
+    canvas.width = payload.gridSize[1] * TILE_SIZE;
+    canvas.height = payload.gridSize[0] * TILE_SIZE;
 
-    updateScoreboard(msg.scores);
-  } else {
+    updateScoreboard(payload.score);
+    return payload
+
+  } else if (msg === "diff") {
     // diff
     msg.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
     msg.updatedPlayers.forEach((p) => players.set(p.id, p));
     if (msg.scores) updateScoreboard(msg.scores);
+
+    return undefined
   }
+
+  return payload
 }
 
 /* =========================================================================
      Scoreboard (table of all players)
      ========================================================================= */
 function updateScoreboard(all: Record<string, ScoreState>) {
+
   const rows = Object.entries(all)
     .sort(([, a], [, b]) => b.kills - a.kills) // simple sort by kills
     .map(
-      ([id, s]) =>
-        `<tr>
-           <td style="color:${players.get(id)?.color ?? "#fff"}">${id === myPlayerId ? "(you)" : id
-        }</td>
+      ([id, s]) => {
+        console.log(myPlayerId)
+        return (`<tr>
+           <td style="color:${players.get(id)?.color ?? "#fff"}">${id === myPlayerId ? "(you)" : id.slice(0, 5)
+          }</td>
            <td>kills: ${s.kills}</td><td>deaths: ${s.deaths}</td><td>assists: ${s.assists
-        }</td>
-         </tr>`
-    )
+          }</td>
+         </tr>`)
+      })
     .join("");
   scoreboardDiv.innerHTML = `<table>
          <thead><tr><th>Player</th><th>K</th><th>D</th><th>A</th></tr></thead>
@@ -165,11 +201,15 @@ function updateScoreboard(all: Record<string, ScoreState>) {
 function render() {
   if (!grid.length) return requestAnimationFrame(render);
 
-  for (let y = 0; y < grid.length; y++)
-    for (let x = 0; x < grid[0].length; x++) {
-      context.fillStyle = tileColor(grid[y][x]);
+
+  // Draw grid tiles
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < collumns; x++) {
+      const cellType = flatGrid.get(`${x},${y}`) || "empty";
+      context.fillStyle = tileColor(cellType);
       context.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
     }
+  }
 
   players.forEach((p) => {
     if (!p.alive) return;

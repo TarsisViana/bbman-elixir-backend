@@ -16,6 +16,8 @@ defmodule ElxServerWeb.Endpoint do
     longpoll: false
   )
 
+  # plug CORSPlug, origin: ["http://localhost:3000"]  set cors if cors error
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # You should set gzip to true if you are running phx.digest

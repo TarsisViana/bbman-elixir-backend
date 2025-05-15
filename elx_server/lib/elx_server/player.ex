@@ -26,4 +26,14 @@ defmodule ElxServer.Player do
       color: color
     }
   end
+
+  def snapshot(%__MODULE__{} = player) do
+    %{
+      id: player.id,
+      x: player.x,
+      y: player.y,
+      color: player.color,
+      alive: player.alive
+    }
+  end
 end

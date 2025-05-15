@@ -1,5 +1,6 @@
 defmodule ElxServer.GameServer do
   use GenServer
+
   alias ElxServer.GameUtils
   alias ElxServer.Player
 
@@ -24,14 +25,13 @@ defmodule ElxServer.GameServer do
   end
 
   def handle_call(:get_players, _from, state) do
-    IO.inspect(state.players)
     {:reply, state.players, state}
   end
 
   def handle_call({:add_player, color}, _from, state) do
     player = Player.create(color, state.grid, state.players)
     updated_players = Map.put(state.players, player.id, player)
-    {:reply, %{player_id: player.id}, %State{state | players: updated_players}}
+    {:reply, player.id, %State{state | players: updated_players}}
   end
 
   def handle_call(:snapshot_scores, _from, state) do
@@ -39,7 +39,7 @@ defmodule ElxServer.GameServer do
       state.players
       |> Enum.into(%{}, fn {id, player} ->
         {
-          "#{id}",
+          id,
           %{
             kills: player.kills,
             deaths: player.deaths,
@@ -49,6 +49,16 @@ defmodule ElxServer.GameServer do
       end)
 
     {:reply, scores, state}
+  end
+
+  def handle_call(:snapshot_players, _from, state) do
+    players =
+      state.players
+      |> Enum.into(%{}, fn {id, player} ->
+        {id, Player.snapshot(player)}
+      end)
+
+    {:reply, players, state}
   end
 
   # Wrappers
@@ -68,5 +78,9 @@ defmodule ElxServer.GameServer do
 
   def snapshot_scores() do
     GenServer.call(__MODULE__, :snapshot_scores)
+  end
+
+  def snapshot_players() do
+    GenServer.call(__MODULE__, :snapshot_players)
   end
 end

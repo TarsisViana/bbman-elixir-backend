@@ -1,8 +1,8 @@
 defmodule ElxServerWeb.GameChannel do
   use ElxServerWeb, :channel
 
-  alias ElxServer.GameServer
   alias ElxServer.GameUtils
+  alias ElxServer.GameServer
 
   def join("game:lobby", %{"color" => color}, socket) do
     {:ok, player_id} = GameServer.add_player(color)
@@ -15,9 +15,12 @@ defmodule ElxServerWeb.GameChannel do
     players = GameServer.get_players()
     score = GameServer.snapshot_scores()
 
+    IO.inspect(socket.assigns)
+
     push(socket, "init", %{
       "playerId" => socket.assigns.player_id,
       "grid" => grid |> format_grid_for_client(),
+      "gridSize" => GameUtils.get_grid_size(),
       "players" => players |> format_players_for_client(),
       "score" => score
     })
