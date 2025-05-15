@@ -163,11 +163,13 @@ function handleServerMessage(msg: string, payload: ServerMessage) {
 
   } else if (payload.type === "diff") {
     // diff
-    payload.updatedCells.forEach((c) => (grid[c.y][c.x] = c.value));
+    payload.updatedCells.forEach((c) => {
+      flatGrid.set(`${c.x},${c.y}`, c.value)
+    });
     payload.updatedPlayers.forEach((p) => players.set(p.id, p));
     if (payload.scores) updateScoreboard(payload.scores);
 
-    return undefined
+    return payload
   }
 
   return payload

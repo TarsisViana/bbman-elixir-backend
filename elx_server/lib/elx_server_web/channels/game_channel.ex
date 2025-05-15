@@ -6,7 +6,7 @@ defmodule ElxServerWeb.GameChannel do
 
   def join("game:lobby", %{"color" => color}, socket) do
     {:ok, player_id} = GameServer.add_player(color)
-    send(self(), :after_join)
+    Process.send_after(self(), :after_join, 100)
     {:ok, assign(socket, :player_id, player_id)}
   end
 
@@ -15,7 +15,7 @@ defmodule ElxServerWeb.GameChannel do
     players = GameServer.snapshot_players()
     score = GameServer.snapshot_scores()
 
-    IO.inspect(GameServer.snapshot_players())
+    IO.inspect(socket)
 
     push(socket, "init", %{
       "type" => "init",
@@ -29,6 +29,15 @@ defmodule ElxServerWeb.GameChannel do
     {:noreply, socket}
   end
 
+  # Disconnects
+  def terminate(_reason, socket) do
+    player_id = socket.assigns.player_id
+    IO.puts("Player #{player_id} disconnected.")
+    GameServer.remove_player(player_id)
+    :ok
+  end
+
+  # ____HELPERS_____
   defp format_grid_for_client(grid) do
     grid
     |> Enum.map(fn {{x, y}, cell} ->

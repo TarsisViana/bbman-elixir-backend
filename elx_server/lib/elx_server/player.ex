@@ -1,7 +1,6 @@
 defmodule ElxServer.Player do
   alias ElxServer.GameUtils
 
-  @derive Jason.Encoder
   defstruct [
     :id,
     :x,
