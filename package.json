@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "monitor": "npx tsc -p . -w"
+    "monitor": "npx tsc -p . -w",
+    "dev": "vite"
   },
   "keywords": [],
   "author": "",

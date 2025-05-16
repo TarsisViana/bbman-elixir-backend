@@ -90,8 +90,9 @@ const flatGrid = new Map<string, number>()
      Networking
      ========================================================================= */
 function send(message: ClientMessage) {
-  websocket?.readyState === WebSocket.OPEN &&
-    websocket.send(JSON.stringify(message));
+  // websocket?.readyState === WebSocket.OPEN &&
+  //   websocket.send(JSON.stringify(message));
+  channel?.push(message.type, message)
 }
 
 function connect(color: string) {
@@ -107,11 +108,8 @@ function connect(color: string) {
       console.error("Unable to join", res);
     });
 
-  channel.on("init", res => {
-    console.log(res)
-  });
-
-  channel.onMessage = handleServerMessage
+  channel.on("init", handleInitMessage)
+  channel.on("diff", handleDiffMessage)
 
   // websocket.onopen = () => send({ type: "join", color });
   // websocket.onmessage = (ev) => handleServerMessage(JSON.parse(ev.data));
@@ -142,37 +140,30 @@ window.addEventListener("keydown", (e) => {
 /* =========================================================================
      Server handling
      ========================================================================= */
-function handleServerMessage(msg: string, payload: ServerMessage) {
-  console.log(msg, payload)
-  if (msg === "init" && payload.type == "init") {
-    myPlayerId = payload.playerId;
-    grid = payload.grid;
-    grid.forEach(({ x, y, value }) => {
-      flatGrid.set(`${x},${y}`, value);
-    });
-    [rows, collumns] = payload.gridSize
-    players.clear();
-    payload.players.forEach((p) => players.set(p.id, p));
 
-    // canvas size now comes from server grid
-    canvas.width = payload.gridSize[1] * TILE_SIZE;
-    canvas.height = payload.gridSize[0] * TILE_SIZE;
+function handleInitMessage(payload: MessageInit) {
+  myPlayerId = payload.playerId;
 
-    updateScoreboard(payload.scores);
-    return payload
+  grid = payload.grid;
+  grid.forEach(({ x, y, value }) => flatGrid.set(`${x},${y}`, value));
+  [rows, collumns] = payload.gridSize
 
-  } else if (payload.type === "diff") {
-    // diff
-    payload.updatedCells.forEach((c) => {
-      flatGrid.set(`${c.x},${c.y}`, c.value)
-    });
-    payload.updatedPlayers.forEach((p) => players.set(p.id, p));
-    if (payload.scores) updateScoreboard(payload.scores);
+  players.clear();
+  payload.players.forEach((p) => players.set(p.id, p));
 
-    return payload
-  }
+  // canvas size now comes from server grid
+  canvas.width = payload.gridSize[1] * TILE_SIZE;
+  canvas.height = payload.gridSize[0] * TILE_SIZE;
 
-  return payload
+  updateScoreboard(payload.scores);
+}
+
+function handleDiffMessage(payload: MessageDiff) {
+  payload.updatedCells.forEach((c) => {
+    flatGrid.set(`${c.x},${c.y}`, c.value)
+  });
+  payload.updatedPlayers.forEach((p) => players.set(p.id, p));
+  if (payload.scores) updateScoreboard(payload.scores);
 }
 
 /* =========================================================================

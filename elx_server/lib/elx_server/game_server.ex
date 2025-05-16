@@ -16,37 +16,39 @@ defmodule ElxServer.GameServer do
               updated_players: []
   end
 
+  # ────────────────────────────────────────────────────────────────────────────
   # PUBLIC FUNCTIONS
-  def get_grid do
-    GenServer.call(__MODULE__, :get_grid)
-  end
+  # ────────────────────────────────────────────────────────────────────────────
 
+  # Player management
   def add_player(color) do
     player_id = GenServer.call(__MODULE__, {:add_player, color})
 
     {:ok, player_id}
   end
 
-  def snapshot_scores() do
-    GenServer.call(__MODULE__, :snapshot_scores)
-  end
+  def init_player_msg() do
+    init_data = GenServer.call(__MODULE__, :init_player_msg)
 
-  def snapshot_players() do
-    GenServer.call(__MODULE__, :snapshot_players)
+    {:ok, init_data}
   end
 
   def remove_player(id) do
     GenServer.cast(__MODULE__, {:remove_player, id})
   end
 
-  # gameloop
+  # ────────────────────────────────────────────────────────────────────────────
+  # GAME LOOP
+  # ────────────────────────────────────────────────────────────────────────────
   def handle_info(:tick, state) do
     # update state
 
     if length(state.updated_players) > 0 do
       diff = %{
         "type" => "diff",
-        "updatedPlayers" => state.updated_players,
+        "updatedPlayers" =>
+          state.updated_players
+          |> Enum.map(fn id -> Map.get(state.players, id) |> Player.snapshot() end),
         "updatedCells" => [],
         "scores" => get_scores(state.players)
       }
@@ -60,38 +62,33 @@ defmodule ElxServer.GameServer do
     end
   end
 
+  # ────────────────────────────────────────────────────────────────────────────
   # SERVER CALLBACKS
+  # ────────────────────────────────────────────────────────────────────────────
   def init(_) do
     schedule_tick()
     grid = GameUtils.build_grid()
     {:ok, %State{grid: grid}}
   end
 
-  def handle_call(:get_grid, _from, state) do
-    {:reply, state.grid, state}
-  end
-
   def handle_call({:add_player, color}, _from, %State{} = state) do
     new_player = Player.create(color, state.grid, state.players)
-    players = Map.put(state.players, new_player.id, new_player)
-    updated_players = state.updated_players ++ [Player.snapshot(new_player)]
 
-    new_state = %State{state | players: players, updated_players: updated_players}
-    IO.inspect(new_state.updated_players, label: "Updated players array:")
+    new_state = %State{
+      state
+      | players: Map.put(state.players, new_player.id, new_player),
+        updated_players: [new_player.id | state.updated_players]
+    }
 
     {:reply, new_player.id, new_state}
   end
 
-  def handle_call(:snapshot_scores, _from, state) do
+  def handle_call(:init_player_msg, _from, state) do
+    grid = state.grid
+    players = Enum.map(state.players, fn {_id, player} -> Player.snapshot(player) end)
     scores = get_scores(state.players)
 
-    {:reply, scores, state}
-  end
-
-  def handle_call(:snapshot_players, _from, state) do
-    players = Enum.map(state.players, fn {_id, player} -> Player.snapshot(player) end)
-
-    {:reply, players, state}
+    {:reply, {grid, players, scores}, state}
   end
 
   def handle_cast({:remove_player, id}, state) do
@@ -100,11 +97,24 @@ defmodule ElxServer.GameServer do
         {:noreply, state}
 
       true ->
-        updated_players = Map.delete(state.players, id)
-        {:noreply, %{state | players: updated_players}}
+        new_players = Map.delete(state.players, id)
+
+        {:noreply, %{state | players: new_players}}
     end
   end
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # ACTION HANDLERS
+  # ────────────────────────────────────────────────────────────────────────────
+  def handle_cast(:move, state) do
+  end
+
+  def handle_cast(:bomb, state) do
+  end
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # HELPERS
+  # ────────────────────────────────────────────────────────────────────────────
   defp schedule_tick do
     Process.send_after(self(), :tick, @tick_ms)
   end
