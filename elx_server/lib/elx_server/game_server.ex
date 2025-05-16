@@ -6,6 +6,15 @@ defmodule ElxServer.GameServer do
 
   @tick_ms 50
 
+  @moduledoc "Cell type enums"
+  @cell_empty 0
+  @cell_wall 1
+  @cell_crate 2
+  @cell_bomb 3
+  @cell_explosion 4
+  @cell_powerup_fire 5
+  @cell_powerup_bomb 6
+
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
@@ -35,6 +44,11 @@ defmodule ElxServer.GameServer do
 
   def remove_player(id) do
     GenServer.cast(__MODULE__, {:remove_player, id})
+  end
+
+  # Action handlers
+  def player_move(data) do
+    GenServer.cast(__MODULE__, {:move, data})
   end
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -106,7 +120,29 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # ACTION HANDLERS
   # ────────────────────────────────────────────────────────────────────────────
-  def handle_cast(:move, state) do
+  def handle_cast({:move, {id, dx, dy} = data}, state) do
+    case Map.get(state.players, id) do
+      nil ->
+        {:noreply, state}
+
+      %Player{alive: false} ->
+        {:noreply, state}
+
+      %Player{x: curr_x, y: curr_y} = player ->
+        {nx, ny} = {curr_x + dx, curr_y + dy}
+
+        cell = Map.get(state.grid, {nx, ny})
+
+        if GameUtils.in_bounds?(nx, ny) and cell not in [@cell_bomb, @cell_wall, @cell_crate] do
+          players = Map.put(state.players, id, %{player | x: nx, y: ny})
+          updated_players = [id | state.updated_players]
+
+          {:noreply, %State{state | players: players, updated_players: updated_players}}
+        else
+          IO.puts("cell blocked: player didnt move")
+          {:noreply, state}
+        end
+    end
   end
 
   def handle_cast(:bomb, state) do

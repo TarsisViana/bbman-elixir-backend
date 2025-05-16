@@ -25,6 +25,10 @@ defmodule ElxServer.GameUtils do
     x >= 0 and x < @columns and y >= 0 and y < @rows
   end
 
+  def cell_empty?(x, y) when is_integer(x) and is_integer(y) do
+    x >= 0 and x < @columns and y >= 0 and y < @rows
+  end
+
   @spec build_grid() :: grid()
   def build_grid() do
     for y <- 0..(@rows - 1), x <- 0..(@columns - 1), into: %{} do

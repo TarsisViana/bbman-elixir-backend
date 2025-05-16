@@ -27,7 +27,10 @@ defmodule ElxServerWeb.GameChannel do
   end
 
   def handle_in("move", payload, socket) do
-    IO.inspect(payload)
+    %{"dx" => dx, "dy" => dy} = payload
+
+    GameServer.player_move({socket.assigns.player_id, dx, dy})
+
     {:reply, :ok, socket}
   end
 
