@@ -1,19 +1,11 @@
 defmodule ElxServer.GameServer do
   use GenServer
 
+  alias ElxServer.GameUtils.Cell
   alias ElxServer.{GameUtils, Player}
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
-
-  @moduledoc "Cell type enums"
-  @cell_empty 0
-  @cell_wall 1
-  @cell_crate 2
-  @cell_bomb 3
-  @cell_explosion 4
-  @cell_powerup_fire 5
-  @cell_powerup_bomb 6
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -23,6 +15,12 @@ defmodule ElxServer.GameServer do
     defstruct grid: %{},
               players: %{},
               updated_players: []
+
+    @type t :: %__MODULE__{
+            grid: GameUtils.grid(),
+            players: map(),
+            updated_players: list()
+          }
   end
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -120,7 +118,7 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # ACTION HANDLERS
   # ────────────────────────────────────────────────────────────────────────────
-  def handle_cast({:move, {id, dx, dy} = data}, state) do
+  def handle_cast({:move, {id, dx, dy} = _data}, %State{} = state) do
     case Map.get(state.players, id) do
       nil ->
         {:noreply, state}
@@ -133,7 +131,7 @@ defmodule ElxServer.GameServer do
 
         cell = Map.get(state.grid, {nx, ny})
 
-        if GameUtils.in_bounds?(nx, ny) and cell not in [@cell_bomb, @cell_wall, @cell_crate] do
+        if GameUtils.in_bounds?(nx, ny) and cell not in [Cell.wall(), Cell.crate(), Cell.bomb()] do
           players = Map.put(state.players, id, %{player | x: nx, y: ny})
           updated_players = [id | state.updated_players]
 
@@ -145,8 +143,8 @@ defmodule ElxServer.GameServer do
     end
   end
 
-  def handle_cast(:bomb, state) do
-  end
+  # def handle_cast(:bomb, state) do
+  # end
 
   # ────────────────────────────────────────────────────────────────────────────
   # HELPERS

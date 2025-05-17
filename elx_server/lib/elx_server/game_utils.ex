@@ -2,16 +2,26 @@ defmodule ElxServer.GameUtils do
   @columns 31
   @rows 25
 
-  @moduledoc "Cell type enums"
-  @cell_empty 0
-  @cell_wall 1
-  @cell_crate 2
-  @cell_bomb 3
-  @cell_explosion 4
-  @cell_powerup_fire 5
-  @cell_powerup_bomb 6
-
   @type grid :: %{{integer(), integer()} => 0..6}
+
+  defmodule Cell do
+    @type t ::
+            :empty
+            | :wall
+            | :crate
+            | :bomb
+            | :explosion
+            | :powerup_fire
+            | :powerup_bomb
+
+    def empty, do: 0
+    def wall, do: 1
+    def crate, do: 2
+    def bomb, do: 3
+    def explosion, do: 4
+    def powerup_fire, do: 5
+    def powerup_bomb, do: 6
+  end
 
   def now_ms do
     System.system_time(:milliseconds)
@@ -38,9 +48,9 @@ defmodule ElxServer.GameUtils do
 
   defp choose_cell_type(x, y) do
     cond do
-      border?(x, y) or pillar?(x, y) -> @cell_wall
-      :rand.uniform() < 0.5 -> @cell_crate
-      true -> @cell_empty
+      border?(x, y) or pillar?(x, y) -> Cell.wall()
+      :rand.uniform() < 0.5 -> Cell.crate()
+      true -> Cell.empty()
     end
   end
 
@@ -63,7 +73,7 @@ defmodule ElxServer.GameUtils do
     y = Enum.random(1..(@rows - 2))
     cell = grid |> Map.get({x, y})
 
-    if cell == @cell_empty and {x, y} not in taken do
+    if cell == Cell.empty() and {x, y} not in taken do
       %{x: x, y: y}
     else
       loop_recursive(grid, taken, attempts - 1)
