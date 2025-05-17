@@ -11,7 +11,7 @@ defmodule ElxServer.Bomb do
   ]
 
   def new(x, y, %Player{} = owner) do
-    %ElxServer.Bomb{
+    %__MODULE__{
       x: x,
       y: y,
       owner: owner,

@@ -23,8 +23,8 @@ defmodule ElxServer.GameUtils do
     def powerup_bomb, do: 6
   end
 
-  def now_ms do
-    System.system_time(:milliseconds)
+  defp now_ms do
+    System.monotonic_time(:millisecond)
   end
 
   def get_grid_size() do

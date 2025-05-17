@@ -2,7 +2,7 @@ defmodule ElxServer.GameServer do
   use GenServer
 
   alias ElxServer.GameUtils.Cell
-  alias ElxServer.{GameUtils, Player}
+  alias ElxServer.{GameUtils, Player, Bomb}
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
@@ -14,12 +14,16 @@ defmodule ElxServer.GameServer do
   defmodule State do
     defstruct grid: %{},
               players: %{},
-              updated_players: []
+              bombs: [],
+              updated_players: [],
+              updated_cells: []
 
     @type t :: %__MODULE__{
             grid: GameUtils.grid(),
             players: map(),
-            updated_players: list()
+            updated_players: list(),
+            updated_cells: list(),
+            bombs: list()
           }
   end
 
@@ -118,6 +122,7 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # ACTION HANDLERS
   # ────────────────────────────────────────────────────────────────────────────
+
   def handle_cast({:move, {id, dx, dy} = _data}, %State{} = state) do
     case Map.get(state.players, id) do
       nil ->
@@ -143,8 +148,37 @@ defmodule ElxServer.GameServer do
     end
   end
 
-  # def handle_cast(:bomb, state) do
-  # end
+  def handle_cast({:bomb, id}, %State{} = state) do
+    case Map.get(state.players, id) do
+      nil ->
+        {:noreply, state}
+
+      %Player{alive: false} ->
+        {:noreply, state}
+
+      %Player{} = pl ->
+        if pl.active_bombs >= pl.max_bombs do
+          {:noreply, state}
+        else
+          bomb = Bomb.new(pl.x, pl.y, pl)
+
+          new_state =
+            state
+            |> update_in([:grid], &Map.put(&1, {pl.x, pl.y}, Cell.bomb()))
+            |> update_in([:bombs], &[bomb | &1])
+            |> update_in([:players, id], &%{&1 | active_bombs: &1.active_bombs + 1})
+            |> update_in([:updated_players], &[id | &1])
+            |> update_in([:updated_cells], &[%{x: pl.x, y: pl.y, value: Cell.bomb()} | &1])
+
+          {:noreply, new_state}
+        end
+    end
+  end
+
+  def handle_cast(msg, state) do
+    IO.warn("Unhandled cast: #{inspect(msg)}")
+    {:noreply, state}
+  end
 
   # ────────────────────────────────────────────────────────────────────────────
   # HELPERS
