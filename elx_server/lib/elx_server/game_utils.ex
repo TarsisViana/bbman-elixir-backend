@@ -23,7 +23,7 @@ defmodule ElxServer.GameUtils do
     def powerup_bomb, do: 6
   end
 
-  defp now_ms do
+  def now_ms do
     System.monotonic_time(:millisecond)
   end
 

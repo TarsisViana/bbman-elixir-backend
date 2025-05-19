@@ -34,6 +34,12 @@ defmodule ElxServerWeb.GameChannel do
     {:reply, :ok, socket}
   end
 
+  def handle_in("bomb", _payload, socket) do
+    GameServer.player_bomb(socket.assigns.player_id)
+
+    {:reply, :ok, socket}
+  end
+
   # Disconnects
   def terminate(_reason, socket) do
     player_id = socket.assigns.player_id

@@ -23,7 +23,7 @@ defmodule ElxServer.GameServer do
             players: map(),
             updated_players: list(),
             updated_cells: list(),
-            bombs: list()
+            bombs: list(Bomb)
           }
   end
 
@@ -53,25 +53,42 @@ defmodule ElxServer.GameServer do
     GenServer.cast(__MODULE__, {:move, data})
   end
 
+  def player_bomb(id) do
+    GenServer.cast(__MODULE__, {:bomb, id})
+  end
+
   # ────────────────────────────────────────────────────────────────────────────
   # GAME LOOP
   # ────────────────────────────────────────────────────────────────────────────
-  def handle_info(:tick, state) do
+  def handle_info(:tick, %State{} = state) do
     # update state
+    tick_start = GameUtils.now_ms()
 
-    if length(state.updated_players) > 0 do
-      diff = %{
+    {%State{} = new_state} = timeout_check(:bombs, tick_start, state)
+
+    diff? = Enum.any?(new_state.updated_players) or Enum.any?(new_state.updated_cells)
+
+    if diff? do
+      updated_players =
+        Enum.map(new_state.updated_players, fn id ->
+          Map.get(state.players, id)
+          |> Player.snapshot()
+        end)
+
+      msg = %{
         "type" => "diff",
-        "updatedPlayers" =>
-          state.updated_players
-          |> Enum.map(fn id -> Map.get(state.players, id) |> Player.snapshot() end),
-        "updatedCells" => [],
-        "scores" => get_scores(state.players)
+        "updatedPlayers" => updated_players,
+        "updatedCells" => new_state.updated_cells,
+        "scores" => get_scores(new_state.players)
       }
 
-      Endpoint.broadcast("game:lobby", "diff", diff)
+      Endpoint.broadcast("game:lobby", "diff", msg)
       schedule_tick()
-      {:noreply, %State{state | updated_players: []}}
+
+      new_state =
+        %State{new_state | updated_cells: [], updated_players: []}
+
+      {:noreply, new_state}
     else
       schedule_tick()
       {:noreply, state}
@@ -163,15 +180,23 @@ defmodule ElxServer.GameServer do
           bomb = Bomb.new(pl.x, pl.y, pl)
 
           new_state =
-            state
-            |> update_in([:grid], &Map.put(&1, {pl.x, pl.y}, Cell.bomb()))
-            |> update_in([:bombs], &[bomb | &1])
-            |> update_in([:players, id], &%{&1 | active_bombs: &1.active_bombs + 1})
-            |> update_in([:updated_players], &[id | &1])
-            |> update_in([:updated_cells], &[%{x: pl.x, y: pl.y, value: Cell.bomb()} | &1])
+            %State{
+              state
+              | grid: Map.put(state.grid, {pl.x, pl.y}, Cell.bomb()),
+                bombs: [bomb | state.bombs],
+                players:
+                  Map.update!(state.players, id, fn p ->
+                    %{p | active_bombs: p.active_bombs + 1}
+                  end),
+                updated_players: [id | state.updated_players],
+                updated_cells: [%{x: pl.x, y: pl.y, value: Cell.bomb()} | state.updated_cells]
+            }
 
           {:noreply, new_state}
         end
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -199,5 +224,29 @@ defmodule ElxServer.GameServer do
         }
       }
     end)
+  end
+
+  def timeout_check(:bombs, time, %State{bombs: bombs} = state) do
+    {live_bombs, exploding} = Enum.split_with(bombs, fn bomb -> bomb.explode_at > time end)
+
+    # extract this logic
+    if Enum.any?(exploding) do
+      new_grid =
+        Enum.reduce(exploding, state.grid, fn bomb, acc ->
+          Map.put(acc, {bomb.x, bomb.y}, Cell.empty())
+        end)
+
+      new_state =
+        %State{
+          state
+          | grid: new_grid,
+            bombs: live_bombs,
+            updated_cells: Enum.map(exploding, fn b -> %{x: b.x, y: b.y, value: Cell.empty()} end)
+        }
+
+      {new_state}
+    else
+      {state}
+    end
   end
 end

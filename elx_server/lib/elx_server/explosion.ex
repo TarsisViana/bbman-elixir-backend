@@ -6,7 +6,7 @@ defmodule ElxServer.Explosion do
     :clear_at
   ]
 
-  @exposion_duration_ms 500
+  @explosion_duration_ms 500
 
   def new(x, y, restore_to) do
     %ElxServer.Explosion{
