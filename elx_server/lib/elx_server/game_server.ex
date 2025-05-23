@@ -236,10 +236,18 @@ defmodule ElxServer.GameServer do
           Map.put(acc, {bomb.x, bomb.y}, Cell.empty())
         end)
 
+      new_players =
+        Enum.reduce(exploding, state.players, fn bomb, acc ->
+          Map.update!(acc, bomb.owner.id, fn %Player{} = curr_player ->
+            %{curr_player | active_bombs: curr_player.active_bombs - 1}
+          end)
+        end)
+
       new_state =
         %State{
           state
           | grid: new_grid,
+            players: new_players,
             bombs: live_bombs,
             updated_cells: Enum.map(exploding, fn b -> %{x: b.x, y: b.y, value: Cell.empty()} end)
         }
