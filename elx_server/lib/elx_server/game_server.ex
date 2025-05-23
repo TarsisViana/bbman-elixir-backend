@@ -69,6 +69,7 @@ defmodule ElxServer.GameServer do
     tick_start = GameUtils.now_ms()
 
     {%State{} = new_state} = timeout_check(:bombs, tick_start, state)
+    {new_state} = timeout_check(:explosions, tick_start, new_state)
 
     diff? = Enum.any?(new_state.updated_players) or Enum.any?(new_state.updated_cells)
 
@@ -163,7 +164,6 @@ defmodule ElxServer.GameServer do
 
           {:noreply, %State{state | players: players, updated_players: updated_players}}
         else
-          IO.puts("cell blocked: player didnt move")
           {:noreply, state}
         end
     end
@@ -235,12 +235,10 @@ defmodule ElxServer.GameServer do
 
     # extract this logic
     if Enum.any?(exploding) do
-      {new_grid, updated_cells} =
-        Enum.reduce(exploding, {state.grid, state.updated_cells}, fn bomb, acc ->
-          GameUtils.set_cell({bomb.x, bomb.y}, Cell.empty(), acc)
+      {new_state} =
+        Enum.reduce(exploding, state, fn bomb, acc ->
+          GameUtils.explode_bomb(bomb, acc)
         end)
-
-      IO.inspect(updated_cells)
 
       new_players =
         Enum.reduce(exploding, state.players, fn bomb, acc ->
@@ -251,11 +249,30 @@ defmodule ElxServer.GameServer do
 
       new_state =
         %State{
-          state
-          | grid: new_grid,
-            players: new_players,
-            bombs: live_bombs,
-            updated_cells: updated_cells
+          new_state
+          | players: new_players,
+            bombs: live_bombs
+        }
+
+      {new_state}
+    else
+      {state}
+    end
+  end
+
+  def timeout_check(:explosions, time, %State{explosions: explosions} = state) do
+    {exploding, explosion_end} =
+      Enum.split_with(explosions, fn explosion ->
+        explosion.clear_at > time
+      end)
+
+    if Enum.any?(explosion_end) do
+      {new_state} = GameUtils.end_explosions(explosion_end, state)
+
+      new_state =
+        %State{
+          new_state
+          | explosions: exploding
         }
 
       {new_state}

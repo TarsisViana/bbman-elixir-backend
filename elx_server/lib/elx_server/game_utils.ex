@@ -1,6 +1,8 @@
 defmodule ElxServer.GameUtils do
   alias ElxServer.GameServer.State
   alias ElxServer.Bomb
+  alias ElxServer.Explosion
+  alias ElxServer.Player
   @columns 31
   @rows 25
 
@@ -83,18 +85,61 @@ defmodule ElxServer.GameUtils do
   end
 
   # Bomb explosion
-  @spec explode_bombs(list(%Bomb{}), %State{}) :: {%State{}}
-  def explode_bombs(bombs, state) do
+  def explode_bomb(%Bomb{owner: %Player{} = player} = bomb, %State{} = state) do
+    {new_state} = blast({bomb.x, bomb.y}, bomb.owner, state)
+
+    dir = [{1, 0}, {-1, 0}, {0, 1}, {0, -1}]
+    wall = Cell.wall()
+    crate = Cell.crate()
+    cell_bomb = Cell.bomb()
+
     new_state =
-      Enum.map(bombs, fn %Bomb{} = bomb ->
-        blast({bomb.x, bomb.y}, bomb.owner, state)
+      Enum.reduce(dir, new_state, fn {dx, dy}, acc_state ->
+        Enum.reduce_while(1..player.fire_power, acc_state, fn i, acc ->
+          nx = bomb.x + dx * i
+          ny = bomb.y + dy * i
+
+          case {in_bounds?(nx, ny), Map.get(acc.grid, {nx, ny})} do
+            {false, _} ->
+              {:halt, acc}
+
+            {true, ^wall} ->
+              {:halt, acc}
+
+            {true, cell} when cell in [crate, cell_bomb] ->
+              {acc} = blast({nx, ny}, player, acc)
+              {:halt, acc}
+
+            {true, _} ->
+              {acc} = blast({nx, ny}, player, acc)
+              {:cont, acc}
+          end
+        end)
       end)
+
+    {new_state}
   end
 
-  def blast({x, y}, owner, state) do
+  defp blast({x, y}, _owner, state) do
     # explode other bombs in range
     # decide what should re-appear after the flame
+    restore = Cell.empty()
+    # explode
+    {new_grid, updated_cells} =
+      set_cell({x, y}, Cell.explosion(), {state.grid, state.updated_cells})
+
+    # schedule cell restoration
+    new_explosions = [Explosion.new(x, y, restore) | state.explosions]
     # kill players in range
+
+    new_state = %{
+      state
+      | grid: new_grid,
+        updated_cells: updated_cells,
+        explosions: new_explosions
+    }
+
+    {new_state}
   end
 
   def set_cell({x, y}, value, {grid, updated_cells}) do
@@ -108,5 +153,21 @@ defmodule ElxServer.GameUtils do
     else
       {grid, updated_cells}
     end
+  end
+
+  def end_explosions(explosions, state) do
+    new_state =
+      Enum.reduce(explosions, state, fn explosion, acc ->
+        {new_grid, updated_cells} =
+          set_cell(
+            {explosion.x, explosion.y},
+            explosion.restore_to,
+            {acc.grid, acc.updated_cells}
+          )
+
+        %{acc | grid: new_grid, updated_cells: updated_cells}
+      end)
+
+    {new_state}
   end
 end
