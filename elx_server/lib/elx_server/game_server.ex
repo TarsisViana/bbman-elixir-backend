@@ -12,9 +12,12 @@ defmodule ElxServer.GameServer do
   end
 
   defmodule State do
+    alias ElxServer.Explosion
+
     defstruct grid: %{},
               players: %{},
               bombs: [],
+              explosions: [],
               updated_players: [],
               updated_cells: []
 
@@ -23,7 +26,8 @@ defmodule ElxServer.GameServer do
             players: map(),
             updated_players: list(),
             updated_cells: list(),
-            bombs: list(Bomb)
+            bombs: list(Bomb),
+            explosions: list(Explosion)
           }
   end
 
@@ -231,10 +235,12 @@ defmodule ElxServer.GameServer do
 
     # extract this logic
     if Enum.any?(exploding) do
-      new_grid =
-        Enum.reduce(exploding, state.grid, fn bomb, acc ->
-          Map.put(acc, {bomb.x, bomb.y}, Cell.empty())
+      {new_grid, updated_cells} =
+        Enum.reduce(exploding, {state.grid, state.updated_cells}, fn bomb, acc ->
+          GameUtils.set_cell({bomb.x, bomb.y}, Cell.empty(), acc)
         end)
+
+      IO.inspect(updated_cells)
 
       new_players =
         Enum.reduce(exploding, state.players, fn bomb, acc ->
@@ -249,7 +255,7 @@ defmodule ElxServer.GameServer do
           | grid: new_grid,
             players: new_players,
             bombs: live_bombs,
-            updated_cells: Enum.map(exploding, fn b -> %{x: b.x, y: b.y, value: Cell.empty()} end)
+            updated_cells: updated_cells
         }
 
       {new_state}

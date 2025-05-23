@@ -1,4 +1,6 @@
 defmodule ElxServer.GameUtils do
+  alias ElxServer.GameServer.State
+  alias ElxServer.Bomb
   @columns 31
   @rows 25
 
@@ -77,6 +79,34 @@ defmodule ElxServer.GameUtils do
       %{x: x, y: y}
     else
       loop_recursive(grid, taken, attempts - 1)
+    end
+  end
+
+  # Bomb explosion
+  @spec explode_bombs(list(%Bomb{}), %State{}) :: {%State{}}
+  def explode_bombs(bombs, state) do
+    new_state =
+      Enum.map(bombs, fn %Bomb{} = bomb ->
+        blast({bomb.x, bomb.y}, bomb.owner, state)
+      end)
+  end
+
+  def blast({x, y}, owner, state) do
+    # explode other bombs in range
+    # decide what should re-appear after the flame
+    # kill players in range
+  end
+
+  def set_cell({x, y}, value, {grid, updated_cells}) do
+    same_value = Map.get(grid, {x, y}) == value
+
+    if in_bounds?(x, y) and not same_value do
+      grid = Map.put(grid, {x, y}, value)
+      updated_cells = [%{x: x, y: y, value: value} | updated_cells]
+
+      {grid, updated_cells}
+    else
+      {grid, updated_cells}
     end
   end
 end
