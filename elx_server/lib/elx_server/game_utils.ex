@@ -120,8 +120,11 @@ defmodule ElxServer.GameUtils do
     {new_state}
   end
 
-  defp blast({x, y}, _owner, state) do
+  defp blast({x, y} = pos, _owner, %State{} = state) do
     # explode other bombs in range
+    cell = Map.get(state.grid, pos)
+    updated_bombs = chain_explosion(pos, cell, state.bombs)
+
     # decide what should re-appear after the flame
     restore = Cell.empty()
     # explode
@@ -136,6 +139,7 @@ defmodule ElxServer.GameUtils do
       state
       | grid: new_grid,
         updated_cells: updated_cells,
+        bombs: updated_bombs,
         explosions: new_explosions
     }
 
@@ -170,4 +174,13 @@ defmodule ElxServer.GameUtils do
 
     {new_state}
   end
+
+  def chain_explosion({x, y}, 3, bombs) do
+    Enum.map(bombs, fn
+      %Bomb{x: ^x, y: ^y} = bomb -> %{bomb | explode_at: now_ms()}
+      bomb -> bomb
+    end)
+  end
+
+  def chain_explosion(_pos, _cell, bombs), do: bombs
 end
