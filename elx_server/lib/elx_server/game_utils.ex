@@ -6,25 +6,38 @@ defmodule ElxServer.GameUtils do
   @columns 31
   @rows 25
 
-  @type grid :: %{{integer(), integer()} => 0..6}
+  @type grid :: %{{integer(), integer()} => cell_type()}
+  @type cell_type ::
+          :empty
+          | :wall
+          | :crate
+          | :bomb
+          | :explosion
+          | :powerup_fire
+          | :powerup_bomb
 
   defmodule Cell do
-    @type t ::
+    @type atom_t ::
             :empty
             | :wall
             | :crate
             | :bomb
             | :explosion
             | :powerup_fire
-            | :powerup_bomb
+            | :powerup_bombs
 
-    def empty, do: 0
-    def wall, do: 1
-    def crate, do: 2
-    def bomb, do: 3
-    def explosion, do: 4
-    def powerup_fire, do: 5
-    def powerup_bomb, do: 6
+    @mapping %{
+      empty: 0,
+      wall: 1,
+      crate: 2,
+      bomb: 3,
+      explosion: 4,
+      powerup_fire: 5,
+      powerup_bomb: 6
+    }
+
+    def to_int(atom) when is_atom(atom), do: Map.fetch!(@mapping, atom)
+    def to_atom(int), do: @mapping |> Enum.find(fn {_k, v} -> v == int end) |> elem(0)
   end
 
   def now_ms do
@@ -52,9 +65,9 @@ defmodule ElxServer.GameUtils do
 
   defp choose_cell_type(x, y) do
     cond do
-      border?(x, y) or pillar?(x, y) -> Cell.wall()
-      :rand.uniform() < 0.5 -> Cell.crate()
-      true -> Cell.empty()
+      border?(x, y) or pillar?(x, y) -> :wall
+      :rand.uniform() < 0.5 -> :crate
+      true -> :empty
     end
   end
 
@@ -77,7 +90,7 @@ defmodule ElxServer.GameUtils do
     y = Enum.random(1..(@rows - 2))
     cell = grid |> Map.get({x, y})
 
-    if cell == Cell.empty() and {x, y} not in taken do
+    if cell == :empty and {x, y} not in taken do
       %{x: x, y: y}
     else
       loop_recursive(grid, taken, attempts - 1)
@@ -89,9 +102,6 @@ defmodule ElxServer.GameUtils do
     {new_state} = blast({bomb.x, bomb.y}, bomb.owner, state)
 
     dir = [{1, 0}, {-1, 0}, {0, 1}, {0, -1}]
-    wall = Cell.wall()
-    crate = Cell.crate()
-    cell_bomb = Cell.bomb()
 
     new_state =
       Enum.reduce(dir, new_state, fn {dx, dy}, acc_state ->
@@ -103,10 +113,10 @@ defmodule ElxServer.GameUtils do
             {false, _} ->
               {:halt, acc}
 
-            {true, ^wall} ->
+            {true, :wall} ->
               {:halt, acc}
 
-            {true, cell} when cell in [crate, cell_bomb] ->
+            {true, cell} when cell in [:crate, :bomb] ->
               {acc} = blast({nx, ny}, player, acc)
               {:halt, acc}
 
@@ -126,10 +136,10 @@ defmodule ElxServer.GameUtils do
     updated_bombs = chain_explosion(pos, cell, state.bombs)
 
     # decide what should re-appear after the flame
-    restore = Cell.empty()
+    restore = :empty
     # explode
     {new_grid, updated_cells} =
-      set_cell({x, y}, Cell.explosion(), {state.grid, state.updated_cells})
+      set_cell({x, y}, :explosion, {state.grid, state.updated_cells})
 
     # schedule cell restoration
     new_explosions = [Explosion.new(x, y, restore) | state.explosions]
@@ -175,7 +185,7 @@ defmodule ElxServer.GameUtils do
     {new_state}
   end
 
-  def chain_explosion({x, y}, 3, bombs) do
+  def chain_explosion({x, y}, :bomb, bombs) do
     Enum.map(bombs, fn
       %Bomb{x: ^x, y: ^y} = bomb -> %{bomb | explode_at: now_ms()}
       bomb -> bomb

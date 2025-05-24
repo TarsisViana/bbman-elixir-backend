@@ -52,7 +52,7 @@ defmodule ElxServerWeb.GameChannel do
   defp format_grid_for_client(grid) do
     grid
     |> Enum.map(fn {{x, y}, cell} ->
-      %{"x" => x, "y" => y, "value" => cell}
+      %{"x" => x, "y" => y, "value" => GameUtils.Cell.to_int(cell)}
     end)
   end
 end

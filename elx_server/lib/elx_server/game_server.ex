@@ -83,7 +83,9 @@ defmodule ElxServer.GameServer do
       msg = %{
         "type" => "diff",
         "updatedPlayers" => updated_players,
-        "updatedCells" => new_state.updated_cells,
+        "updatedCells" =>
+          new_state.updated_cells
+          |> Enum.map(fn cell -> %{cell | value: Cell.to_int(cell.value)} end),
         "scores" => get_scores(new_state.players)
       }
 
@@ -158,7 +160,7 @@ defmodule ElxServer.GameServer do
 
         cell = Map.get(state.grid, {nx, ny})
 
-        if GameUtils.in_bounds?(nx, ny) and cell not in [Cell.wall(), Cell.crate(), Cell.bomb()] do
+        if GameUtils.in_bounds?(nx, ny) and cell not in [:wall, :crate, :bomb] do
           players = Map.put(state.players, id, %{player | x: nx, y: ny})
           updated_players = [id | state.updated_players]
 
@@ -186,14 +188,14 @@ defmodule ElxServer.GameServer do
           new_state =
             %State{
               state
-              | grid: Map.put(state.grid, {pl.x, pl.y}, Cell.bomb()),
+              | grid: Map.put(state.grid, {pl.x, pl.y}, :bomb),
                 bombs: [bomb | state.bombs],
                 players:
                   Map.update!(state.players, id, fn p ->
                     %{p | active_bombs: p.active_bombs + 1}
                   end),
                 updated_players: [id | state.updated_players],
-                updated_cells: [%{x: pl.x, y: pl.y, value: Cell.bomb()} | state.updated_cells]
+                updated_cells: [%{x: pl.x, y: pl.y, value: :bomb} | state.updated_cells]
             }
 
           {:noreply, new_state}
