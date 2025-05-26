@@ -99,7 +99,12 @@ defmodule ElxServer.GameUtils do
 
   # Bomb explosion
   def explode_bomb(%Bomb{owner: %Player{} = player} = bomb, %State{} = state) do
-    {new_state} = blast({bomb.x, bomb.y}, bomb.owner, state)
+    {new_state} = blast({bomb.x, bomb.y}, player, state)
+
+    new_players =
+      Map.update!(state.players, player.id, fn %Player{} = curr_player ->
+        %{curr_player | active_bombs: curr_player.active_bombs - 1}
+      end)
 
     dir = [{1, 0}, {-1, 0}, {0, 1}, {0, -1}]
 
@@ -127,6 +132,8 @@ defmodule ElxServer.GameUtils do
         end)
       end)
 
+    IO.puts("cabum")
+
     {new_state}
   end
 
@@ -134,7 +141,6 @@ defmodule ElxServer.GameUtils do
     # explode other bombs in range
     cell = Map.get(state.grid, pos)
     updated_bombs = chain_explosion(pos, cell, state.bombs)
-
     # decide what should re-appear after the flame
     restore = :empty
     # explode

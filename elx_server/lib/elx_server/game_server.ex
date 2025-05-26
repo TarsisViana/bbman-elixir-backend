@@ -90,14 +90,18 @@ defmodule ElxServer.GameServer do
       }
 
       Endpoint.broadcast("game:lobby", "diff", msg)
-      schedule_tick()
+
+      # schedule tick to 50ms from the start of this or imediately
+      time_taken = GameUtils.now_ms() - tick_start
+      max(0, @tick_ms - time_taken) |> schedule_tick()
 
       new_state =
         %State{new_state | updated_cells: [], updated_players: []}
 
       {:noreply, new_state}
     else
-      schedule_tick()
+      time_taken = GameUtils.now_ms() - tick_start
+      max(0, @tick_ms - time_taken) |> schedule_tick()
       {:noreply, state}
     end
   end
@@ -106,7 +110,7 @@ defmodule ElxServer.GameServer do
   # SERVER CALLBACKS
   # ────────────────────────────────────────────────────────────────────────────
   def init(_) do
-    schedule_tick()
+    schedule_tick(@tick_ms)
     grid = GameUtils.build_grid()
     {:ok, %State{grid: grid}}
   end
@@ -214,8 +218,8 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # HELPERS
   # ────────────────────────────────────────────────────────────────────────────
-  defp schedule_tick do
-    Process.send_after(self(), :tick, @tick_ms)
+  defp schedule_tick(delay) do
+    Process.send_after(self(), :tick, delay)
   end
 
   defp get_scores(players) do
@@ -238,7 +242,7 @@ defmodule ElxServer.GameServer do
     # extract this logic
     if Enum.any?(exploding) do
       {new_state} =
-        Enum.reduce(exploding, state, fn bomb, acc ->
+        Enum.reduce(exploding, %{state | bombs: live_bombs}, fn bomb, acc ->
           GameUtils.explode_bomb(bomb, acc)
         end)
 
@@ -252,8 +256,7 @@ defmodule ElxServer.GameServer do
       new_state =
         %State{
           new_state
-          | players: new_players,
-            bombs: live_bombs
+          | players: new_players
         }
 
       {new_state}
