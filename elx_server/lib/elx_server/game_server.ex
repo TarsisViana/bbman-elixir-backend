@@ -6,6 +6,8 @@ defmodule ElxServer.GameServer do
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
+  @topic "game:lobby"
+  @event_diff "diff"
 
   def start_link(_opts) do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
@@ -18,14 +20,14 @@ defmodule ElxServer.GameServer do
               players: %{},
               bombs: [],
               explosions: [],
-              updated_players: [],
-              updated_cells: []
+              updated_players: MapSet.new(),
+              updated_cells: MapSet.new()
 
     @type t :: %__MODULE__{
             grid: GameUtils.grid(),
             players: map(),
-            updated_players: list(),
-            updated_cells: list(),
+            updated_players: MapSet.t(),
+            updated_cells: MapSet.t(),
             bombs: list(Bomb),
             explosions: list(Explosion)
           }
@@ -65,52 +67,44 @@ defmodule ElxServer.GameServer do
   # GAME LOOP
   # ────────────────────────────────────────────────────────────────────────────
   def handle_info(:tick, %State{} = state) do
-    # update state
-    tick_start = GameUtils.now_ms()
+    started_at = GameUtils.now_ms()
 
-    {%State{} = new_state} = timeout_check(:bombs, tick_start, state)
-    {new_state} = timeout_check(:explosions, tick_start, new_state)
+    state
+    |> timeout_check(:bombs, started_at)
+    |> timeout_check(:explosions, started_at)
+    |> diff_or_idle(started_at)
+  end
 
-    diff? = Enum.any?(new_state.updated_players) or Enum.any?(new_state.updated_cells)
+  defp diff_or_idle(
+         %State{updated_players: up_players, updated_cells: up_cells} = state,
+         started_at
+       )
+       when map_size(up_players) > 0 or map_size(up_cells) > 0 do
+    updated_players =
+      Enum.map(up_players, fn id -> state.players |> Map.fetch!(id) |> Player.snapshot() end)
 
-    if diff? do
-      updated_players =
-        Enum.map(new_state.updated_players, fn id ->
-          Map.get(state.players, id)
-          |> Player.snapshot()
-        end)
+    msg = %{
+      "type" => @event_diff,
+      "updatedPlayers" => updated_players,
+      "updatedCells" => Enum.map(MapSet.to_list(up_cells), &%{&1 | value: Cell.to_int(&1.value)}),
+      "scores" => get_scores(state.players)
+    }
 
-      msg = %{
-        "type" => "diff",
-        "updatedPlayers" => updated_players,
-        "updatedCells" =>
-          new_state.updated_cells
-          |> Enum.map(fn cell -> %{cell | value: Cell.to_int(cell.value)} end),
-        "scores" => get_scores(new_state.players)
-      }
+    Endpoint.broadcast(@topic, @event_diff, msg)
+    schedule_tick(started_at)
+    {:noreply, %State{state | updated_players: MapSet.new(), updated_cells: MapSet.new()}}
+  end
 
-      Endpoint.broadcast("game:lobby", "diff", msg)
-
-      # schedule tick to 50ms from the start of this or imediately
-      time_taken = GameUtils.now_ms() - tick_start
-      max(0, @tick_ms - time_taken) |> schedule_tick()
-
-      new_state =
-        %State{new_state | updated_cells: [], updated_players: []}
-
-      {:noreply, new_state}
-    else
-      time_taken = GameUtils.now_ms() - tick_start
-      max(0, @tick_ms - time_taken) |> schedule_tick()
-      {:noreply, state}
-    end
+  defp diff_or_idle(%State{} = state, started_at) do
+    schedule_tick(started_at)
+    {:noreply, state}
   end
 
   # ────────────────────────────────────────────────────────────────────────────
   # SERVER CALLBACKS
   # ────────────────────────────────────────────────────────────────────────────
   def init(_) do
-    schedule_tick(@tick_ms)
+    schedule_tick(GameUtils.now_ms())
     grid = GameUtils.build_grid()
     {:ok, %State{grid: grid}}
   end
@@ -121,7 +115,7 @@ defmodule ElxServer.GameServer do
     new_state = %State{
       state
       | players: Map.put(state.players, new_player.id, new_player),
-        updated_players: [new_player.id | state.updated_players]
+        updated_players: MapSet.put(state.updated_players, new_player.id)
     }
 
     {:reply, new_player.id, new_state}
@@ -150,30 +144,26 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # ACTION HANDLERS
   # ────────────────────────────────────────────────────────────────────────────
+  @blocked [:wall, :crate, :bomb]
 
-  def handle_cast({:move, {id, dx, dy} = _data}, %State{} = state) do
-    case Map.get(state.players, id) do
-      nil ->
-        {:noreply, state}
+  def handle_cast({:move, {id, dx, dy}}, %State{players: players} = state)
+      when is_map_key(players, id) do
+    %Player{alive: true, x: x, y: y} = players[id]
+    nx = x + dx
+    ny = y + dy
 
-      %Player{alive: false} ->
-        {:noreply, state}
+    with true <- GameUtils.in_bounds?(nx, ny),
+         false <- Map.get(state.grid, {nx, ny}) in @blocked do
+      players = Map.update!(players, id, &%{&1 | x: nx, y: ny})
 
-      %Player{x: curr_x, y: curr_y} = player ->
-        {nx, ny} = {curr_x + dx, curr_y + dy}
-
-        cell = Map.get(state.grid, {nx, ny})
-
-        if GameUtils.in_bounds?(nx, ny) and cell not in [:wall, :crate, :bomb] do
-          players = Map.put(state.players, id, %{player | x: nx, y: ny})
-          updated_players = [id | state.updated_players]
-
-          {:noreply, %State{state | players: players, updated_players: updated_players}}
-        else
-          {:noreply, state}
-        end
+      {:noreply,
+       %{state | players: players, updated_players: MapSet.put(state.updated_players, id)}}
+    else
+      _ -> {:noreply, state}
     end
   end
+
+  def handle_cast({:move, _}, state), do: {:noreply, state}
 
   def handle_cast({:bomb, id}, %State{} = state) do
     case Map.get(state.players, id) do
@@ -198,8 +188,12 @@ defmodule ElxServer.GameServer do
                   Map.update!(state.players, id, fn p ->
                     %{p | active_bombs: p.active_bombs + 1}
                   end),
-                updated_players: [id | state.updated_players],
-                updated_cells: [%{x: pl.x, y: pl.y, value: :bomb} | state.updated_cells]
+                updated_players: MapSet.put(state.updated_players, id),
+                updated_cells:
+                  MapSet.put(
+                    state.updated_cells,
+                    %{x: pl.x, y: pl.y, value: :bomb}
+                  )
             }
 
           {:noreply, new_state}
@@ -218,8 +212,10 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # HELPERS
   # ────────────────────────────────────────────────────────────────────────────
-  defp schedule_tick(delay) do
-    Process.send_after(self(), :tick, delay)
+  defp schedule_tick(started_at) when is_integer(started_at) do
+    elapsed = GameUtils.now_ms() - started_at
+    wait = max(@tick_ms - elapsed, 0)
+    Process.send_after(self(), :tick, wait)
   end
 
   defp get_scores(players) do
@@ -236,7 +232,7 @@ defmodule ElxServer.GameServer do
     end)
   end
 
-  def timeout_check(:bombs, time, %State{bombs: bombs} = state) do
+  def timeout_check(%State{bombs: bombs} = state, :bombs, time) do
     {live_bombs, exploding} = Enum.split_with(bombs, fn bomb -> bomb.explode_at > time end)
 
     # extract this logic
@@ -259,13 +255,13 @@ defmodule ElxServer.GameServer do
           | players: new_players
         }
 
-      {new_state}
+      new_state
     else
-      {state}
+      state
     end
   end
 
-  def timeout_check(:explosions, time, %State{explosions: explosions} = state) do
+  def timeout_check(%State{explosions: explosions} = state, :explosions, time) do
     {exploding, explosion_end} =
       Enum.split_with(explosions, fn explosion ->
         explosion.clear_at > time
@@ -280,9 +276,9 @@ defmodule ElxServer.GameServer do
           | explosions: exploding
         }
 
-      {new_state}
+      new_state
     else
-      {state}
+      state
     end
   end
 end

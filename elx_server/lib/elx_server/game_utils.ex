@@ -132,8 +132,6 @@ defmodule ElxServer.GameUtils do
         end)
       end)
 
-    IO.puts("cabum")
-
     {new_state}
   end
 
@@ -167,7 +165,7 @@ defmodule ElxServer.GameUtils do
 
     if in_bounds?(x, y) and not same_value do
       grid = Map.put(grid, {x, y}, value)
-      updated_cells = [%{x: x, y: y, value: value} | updated_cells]
+      updated_cells = MapSet.put(updated_cells, %{x: x, y: y, value: value})
 
       {grid, updated_cells}
     else
