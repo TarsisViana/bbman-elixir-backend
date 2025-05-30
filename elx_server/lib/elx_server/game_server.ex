@@ -6,6 +6,7 @@ defmodule ElxServer.GameServer do
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
+  @respawn_ms 1000
   @topic "game:lobby"
   @event_diff "diff"
 
@@ -63,6 +64,10 @@ defmodule ElxServer.GameServer do
     GenServer.cast(__MODULE__, {:bomb, id})
   end
 
+  def schedule_respawn(id) do
+    Process.send_after(__MODULE__, {:schedule_respawn, id}, @respawn_ms)
+  end
+
   # ────────────────────────────────────────────────────────────────────────────
   # GAME LOOP
   # ────────────────────────────────────────────────────────────────────────────
@@ -73,6 +78,26 @@ defmodule ElxServer.GameServer do
     |> timeout_check(:bombs, started_at)
     |> timeout_check(:explosions, started_at)
     |> diff_or_idle(started_at)
+  end
+
+  def handle_info({:schedule_respawn, id}, %State{} = state) do
+    case Map.get(state.players, id) do
+      nil ->
+        {:noreply, state}
+
+      player ->
+        {x, y} = GameUtils.find_free_spawn(state.grid, state.players)
+
+        updated_player = %{player | x: x, y: y, alive: true}
+
+        new_state = %{
+          state
+          | players: Map.put(state.players, updated_player.id, updated_player),
+            updated_players: MapSet.put(state.updated_players, updated_player.id)
+        }
+
+        {:noreply, new_state}
+    end
   end
 
   defp diff_or_idle(
@@ -86,7 +111,7 @@ defmodule ElxServer.GameServer do
     msg = %{
       "type" => @event_diff,
       "updatedPlayers" => updated_players,
-      "updatedCells" => Enum.map(MapSet.to_list(up_cells), &%{&1 | value: Cell.to_int(&1.value)}),
+      "updatedCells" => Enum.map(up_cells, &%{&1 | value: Cell.to_int(&1.value)}),
       "scores" => get_scores(state.players)
     }
 
@@ -235,27 +260,10 @@ defmodule ElxServer.GameServer do
   def timeout_check(%State{bombs: bombs} = state, :bombs, time) do
     {live_bombs, exploding} = Enum.split_with(bombs, fn bomb -> bomb.explode_at > time end)
 
-    # extract this logic
     if Enum.any?(exploding) do
-      {new_state} =
-        Enum.reduce(exploding, %{state | bombs: live_bombs}, fn bomb, acc ->
-          GameUtils.explode_bomb(bomb, acc)
-        end)
-
-      new_players =
-        Enum.reduce(exploding, state.players, fn bomb, acc ->
-          Map.update!(acc, bomb.owner.id, fn %Player{} = curr_player ->
-            %{curr_player | active_bombs: curr_player.active_bombs - 1}
-          end)
-        end)
-
-      new_state =
-        %State{
-          new_state
-          | players: new_players
-        }
-
-      new_state
+      Enum.reduce(exploding, %{state | bombs: live_bombs}, fn bomb, acc ->
+        GameUtils.explode_bomb(bomb, acc)
+      end)
     else
       state
     end

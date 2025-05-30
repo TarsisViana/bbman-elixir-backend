@@ -91,26 +91,29 @@ defmodule ElxServer.GameUtils do
     cell = grid |> Map.get({x, y})
 
     if cell == :empty and {x, y} not in taken do
-      %{x: x, y: y}
+      {x, y}
     else
       loop_recursive(grid, taken, attempts - 1)
     end
   end
 
   # Bomb explosion
-  def explode_bomb(%Bomb{owner: %Player{} = player} = bomb, %State{} = state) do
-    {new_state} = blast({bomb.x, bomb.y}, player, state)
+  def explode_bomb(%Bomb{owner: %Player{} = owner} = bomb, %State{} = state) do
+    new_state = %{
+      state
+      | players:
+          Map.update!(state.players, owner.id, fn %Player{} = curr_player ->
+            %{curr_player | active_bombs: curr_player.active_bombs - 1}
+          end)
+    }
 
-    new_players =
-      Map.update!(state.players, player.id, fn %Player{} = curr_player ->
-        %{curr_player | active_bombs: curr_player.active_bombs - 1}
-      end)
+    new_state = blast({bomb.x, bomb.y}, owner, new_state)
 
     dir = [{1, 0}, {-1, 0}, {0, 1}, {0, -1}]
 
     new_state =
       Enum.reduce(dir, new_state, fn {dx, dy}, acc_state ->
-        Enum.reduce_while(1..player.fire_power, acc_state, fn i, acc ->
+        Enum.reduce_while(1..owner.fire_power, acc_state, fn i, acc ->
           nx = bomb.x + dx * i
           ny = bomb.y + dy * i
 
@@ -122,20 +125,20 @@ defmodule ElxServer.GameUtils do
               {:halt, acc}
 
             {true, cell} when cell in [:crate, :bomb] ->
-              {acc} = blast({nx, ny}, player, acc)
+              acc = blast({nx, ny}, owner, acc)
               {:halt, acc}
 
             {true, _} ->
-              {acc} = blast({nx, ny}, player, acc)
+              acc = blast({nx, ny}, owner, acc)
               {:cont, acc}
           end
         end)
       end)
 
-    {new_state}
+    new_state
   end
 
-  defp blast({x, y} = pos, _owner, %State{} = state) do
+  defp blast({x, y} = pos, owner, %State{} = state) do
     # explode other bombs in range
     cell = Map.get(state.grid, pos)
     updated_bombs = chain_explosion(pos, cell, state.bombs)
@@ -147,17 +150,19 @@ defmodule ElxServer.GameUtils do
 
     # schedule cell restoration
     new_explosions = [Explosion.new(x, y, restore) | state.explosions]
-    # kill players in range
 
-    new_state = %{
+    # kill players in range
+    {new_players, updated_players} = kill_player_at({x, y}, owner, state)
+
+    %State{
       state
       | grid: new_grid,
         updated_cells: updated_cells,
         bombs: updated_bombs,
-        explosions: new_explosions
+        explosions: new_explosions,
+        players: new_players,
+        updated_players: updated_players
     }
-
-    {new_state}
   end
 
   def set_cell({x, y}, value, {grid, updated_cells}) do
@@ -197,4 +202,33 @@ defmodule ElxServer.GameUtils do
   end
 
   def chain_explosion(_pos, _cell, bombs), do: bombs
+
+  def kill_player_at({x, y}, bomb_owner, %State{} = state) do
+    Enum.reduce(state.players, {state.players, state.updated_players}, fn
+      {id, %Player{alive: true, x: ^x, y: ^y} = pl}, {acc_pl, acc_ids} ->
+        # Kill the fool
+        acc_pl = Map.put(acc_pl, id, %{pl | alive: false, deaths: pl.deaths + 1})
+        acc_ids = MapSet.put(acc_ids, id)
+
+        # kill credit
+        acc_pl =
+          if id != bomb_owner.id do
+            Map.update!(acc_pl, bomb_owner.id, fn player ->
+              %{player | kills: player.kills + 1}
+            end)
+          else
+            acc_pl
+          end
+
+        acc_ids = MapSet.put(acc_ids, bomb_owner.id)
+
+        # Schedule respawn
+        ElxServer.GameServer.schedule_respawn(id)
+
+        {acc_pl, acc_ids}
+
+      _, acc ->
+        acc
+    end)
+  end
 end
