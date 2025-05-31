@@ -173,16 +173,18 @@ defmodule ElxServer.GameServer do
 
   def handle_cast({:move, {id, dx, dy}}, %State{players: players} = state)
       when is_map_key(players, id) do
-    %Player{alive: true, x: x, y: y} = players[id]
+    %Player{alive: alive, x: x, y: y} = players[id]
     nx = x + dx
     ny = y + dy
 
     with true <- GameUtils.in_bounds?(nx, ny),
+         true <- alive,
          false <- Map.get(state.grid, {nx, ny}) in @blocked do
-      players = Map.update!(players, id, &%{&1 | x: nx, y: ny})
+      state =
+        Map.update!(players, id, &%{&1 | x: nx, y: ny})
+        |> GameUtils.check_powerup({nx, ny}, id, state)
 
-      {:noreply,
-       %{state | players: players, updated_players: MapSet.put(state.updated_players, id)}}
+      {:noreply, %{state | updated_players: MapSet.put(state.updated_players, id)}}
     else
       _ -> {:noreply, state}
     end

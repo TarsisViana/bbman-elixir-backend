@@ -97,7 +97,6 @@ defmodule ElxServer.GameUtils do
     end
   end
 
-  # Bomb explosion
   def explode_bomb(%Bomb{owner: %Player{} = owner} = bomb, %State{} = state) do
     new_state = %{
       state
@@ -143,7 +142,7 @@ defmodule ElxServer.GameUtils do
     cell = Map.get(state.grid, pos)
     updated_bombs = chain_explosion(pos, cell, state.bombs)
     # decide what should re-appear after the flame
-    restore = :empty
+    restore = maybe_powerup(cell)
     # explode
     {new_grid, updated_cells} =
       set_cell({x, y}, :explosion, {state.grid, state.updated_cells})
@@ -164,6 +163,21 @@ defmodule ElxServer.GameUtils do
         updated_players: updated_players
     }
   end
+
+  defp maybe_powerup(:crate) do
+    case :rand.uniform() do
+      r when r < 0.1 ->
+        :powerup_fire
+
+      r when r < 0.2 ->
+        :powerup_bomb
+
+      _ ->
+        :empty
+    end
+  end
+
+  defp maybe_powerup(_cell), do: :empty
 
   def set_cell({x, y}, value, {grid, updated_cells}) do
     same_value = Map.get(grid, {x, y}) == value
@@ -230,5 +244,32 @@ defmodule ElxServer.GameUtils do
       _, acc ->
         acc
     end)
+  end
+
+  def check_powerup(players, pos, id, %State{} = state) do
+    case Map.get(state.grid, pos) do
+      :powerup_bomb ->
+        updated_players =
+          Map.update!(players, id, fn %Player{} = player ->
+            %{player | max_bombs: player.max_bombs + 1}
+          end)
+
+        {grid, updated_cells} = set_cell(pos, :empty, {state.grid, state.updated_cells})
+
+        %{state | grid: grid, players: updated_players, updated_cells: updated_cells}
+
+      :powerup_fire ->
+        updated_players =
+          Map.update!(players, id, fn %Player{} = player ->
+            %{player | fire_power: player.fire_power + 1}
+          end)
+
+        {grid, updated_cells} = set_cell(pos, :empty, {state.grid, state.updated_cells})
+
+        %{state | grid: grid, players: updated_players, updated_cells: updated_cells}
+
+      _ ->
+        %{state | players: players}
+    end
   end
 end
