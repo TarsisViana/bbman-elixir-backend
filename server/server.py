@@ -46,7 +46,7 @@ def build_grid() -> Sequence[Sequence[int]]:
     return g
 
 
-def find_free_spawn() -> Tuple[int, int]:
+def find_free_cell() -> Tuple[int, int]:
     while True:
         x, y = random.randrange(1, COLUMNS - 1), random.randrange(1, ROWS - 1)
         if grid[y][x] == Cell.empty and all(
@@ -63,7 +63,7 @@ class Player:
         self.ws = ws
         self.id = secrets.token_hex(8)
         self.color = color
-        self.x, self.y = find_free_spawn()
+        self.x, self.y = find_free_cell()
         self.alive = True
         self.fire_power = 2
         self.max_bombs = 1
@@ -251,7 +251,7 @@ def handle_bomb(pl: Player):
 
 
 def respawn_handler(pl: Player):
-    pl.x, pl.y = find_free_spawn()
+    pl.x, pl.y = find_free_cell()
     pl.alive = True
     updated_players.add(pl.id)
 

@@ -17,12 +17,15 @@ defmodule ElxServer.GameServer do
   defmodule State do
     alias ElxServer.Explosion
 
-    defstruct grid: %{},
-              players: %{},
-              bombs: [],
-              explosions: [],
-              updated_players: MapSet.new(),
-              updated_cells: MapSet.new()
+    defstruct [
+      :last_refill,
+      grid: %{},
+      players: %{},
+      bombs: [],
+      explosions: [],
+      updated_players: MapSet.new(),
+      updated_cells: MapSet.new()
+    ]
 
     @type t :: %__MODULE__{
             grid: GameUtils.grid(),
@@ -30,7 +33,8 @@ defmodule ElxServer.GameServer do
             updated_players: MapSet.t(),
             updated_cells: MapSet.t(),
             bombs: list(Bomb),
-            explosions: list(Explosion)
+            explosions: list(Explosion),
+            last_refill: integer()
           }
   end
 
@@ -77,6 +81,7 @@ defmodule ElxServer.GameServer do
     state
     |> timeout_check(:bombs, started_at)
     |> timeout_check(:explosions, started_at)
+    |> GameUtils.maybe_refill_crates()
     |> diff_or_idle(started_at)
   end
 
@@ -86,7 +91,7 @@ defmodule ElxServer.GameServer do
         {:noreply, state}
 
       player ->
-        {x, y} = GameUtils.find_free_spawn(state.grid, state.players)
+        {x, y} = GameUtils.find_free_cell(state.grid, state.players)
 
         updated_player = %{player | x: x, y: y, alive: true}
 
@@ -131,7 +136,7 @@ defmodule ElxServer.GameServer do
   def init(_) do
     schedule_tick(GameUtils.now_ms())
     grid = GameUtils.build_grid()
-    {:ok, %State{grid: grid}}
+    {:ok, %State{grid: grid, last_refill: GameUtils.now_ms()}}
   end
 
   def handle_call({:add_player, color}, _from, %State{} = state) do

@@ -16,7 +16,7 @@ defmodule ElxServer.Player do
   ]
 
   def create(color, grid, players) do
-    {x, y} = GameUtils.find_free_spawn(grid, players)
+    {x, y} = GameUtils.find_free_cell(grid, players)
 
     %__MODULE__{
       id: UUID.uuid4(),
