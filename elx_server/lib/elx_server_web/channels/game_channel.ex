@@ -2,17 +2,17 @@ defmodule ElxServerWeb.GameChannel do
   use ElxServerWeb, :channel
 
   alias ElxServer.GameUtils
-  alias ElxServer.GameServer
+  alias ElxServer.Game
 
   def join("game:lobby", %{"color" => color}, socket) do
-    {:ok, player_id} = GameServer.add_player(color)
+    player_id = Game.add_player(color)
 
     send(self(), :after_join)
     {:ok, assign(socket, :player_id, player_id)}
   end
 
   def handle_info(:after_join, socket) do
-    {:ok, {grid, players, scores}} = GameServer.init_player_msg()
+    {grid, players, scores} = Game.init_player_msg()
 
     push(socket, "init", %{
       "type" => "init",
@@ -29,13 +29,13 @@ defmodule ElxServerWeb.GameChannel do
   def handle_in("move", payload, socket) do
     %{"dx" => dx, "dy" => dy} = payload
 
-    GameServer.player_move({socket.assigns.player_id, dx, dy})
+    Game.player_move({socket.assigns.player_id, dx, dy})
 
     {:reply, :ok, socket}
   end
 
   def handle_in("bomb", _payload, socket) do
-    GameServer.player_bomb(socket.assigns.player_id)
+    Game.player_bomb(socket.assigns.player_id)
 
     {:reply, :ok, socket}
   end
@@ -44,7 +44,7 @@ defmodule ElxServerWeb.GameChannel do
   def terminate(_reason, socket) do
     player_id = socket.assigns.player_id
     IO.puts("Player #{player_id} disconnected.")
-    GameServer.remove_player(player_id)
+    Game.remove_player(player_id)
     :ok
   end
 

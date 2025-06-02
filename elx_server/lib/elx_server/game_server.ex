@@ -6,7 +6,6 @@ defmodule ElxServer.GameServer do
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
-  @respawn_ms 1000
   @topic "game:lobby"
   @event_diff "diff"
 
@@ -36,40 +35,6 @@ defmodule ElxServer.GameServer do
             explosions: list(Explosion),
             last_refill: integer()
           }
-  end
-
-  # ────────────────────────────────────────────────────────────────────────────
-  # PUBLIC FUNCTIONS
-  # ────────────────────────────────────────────────────────────────────────────
-
-  # Player management
-  def add_player(color) do
-    player_id = GenServer.call(__MODULE__, {:add_player, color})
-
-    {:ok, player_id}
-  end
-
-  def init_player_msg() do
-    init_data = GenServer.call(__MODULE__, :init_player_msg)
-
-    {:ok, init_data}
-  end
-
-  def remove_player(id) do
-    GenServer.cast(__MODULE__, {:remove_player, id})
-  end
-
-  # Action handlers
-  def player_move(data) do
-    GenServer.cast(__MODULE__, {:move, data})
-  end
-
-  def player_bomb(id) do
-    GenServer.cast(__MODULE__, {:bomb, id})
-  end
-
-  def schedule_respawn(id) do
-    Process.send_after(__MODULE__, {:schedule_respawn, id}, @respawn_ms)
   end
 
   # ────────────────────────────────────────────────────────────────────────────

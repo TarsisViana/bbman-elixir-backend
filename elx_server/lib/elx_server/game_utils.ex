@@ -239,7 +239,7 @@ defmodule ElxServer.GameUtils do
         acc_ids = MapSet.put(acc_ids, bomb_owner.id)
 
         # Schedule respawn
-        ElxServer.GameServer.schedule_respawn(id)
+        ElxServer.Game.schedule_respawn(id)
 
         {acc_pl, acc_ids}
 
