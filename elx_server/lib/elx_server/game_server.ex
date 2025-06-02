@@ -1,8 +1,8 @@
 defmodule ElxServer.GameServer do
   use GenServer
 
-  alias ElxServer.GameUtils.Cell
-  alias ElxServer.{GameUtils, Player, Bomb}
+  alias ElxServer.Grid.Cell
+  alias ElxServer.{Player, Bomb, Grid, Explosion}
   alias ElxServerWeb.Endpoint
 
   @tick_ms 50
@@ -27,7 +27,7 @@ defmodule ElxServer.GameServer do
     ]
 
     @type t :: %__MODULE__{
-            grid: GameUtils.grid(),
+            grid: Grid.grid(),
             players: map(),
             updated_players: MapSet.t(),
             updated_cells: MapSet.t(),
@@ -41,12 +41,12 @@ defmodule ElxServer.GameServer do
   # GAME LOOP
   # ────────────────────────────────────────────────────────────────────────────
   def handle_info(:tick, %State{} = state) do
-    started_at = GameUtils.now_ms()
+    started_at = now_ms()
 
     state
     |> timeout_check(:bombs, started_at)
     |> timeout_check(:explosions, started_at)
-    |> GameUtils.maybe_refill_crates()
+    |> Grid.maybe_refill_crates(started_at)
     |> diff_or_idle(started_at)
   end
 
@@ -56,7 +56,7 @@ defmodule ElxServer.GameServer do
         {:noreply, state}
 
       player ->
-        {x, y} = GameUtils.find_free_cell(state.grid, state.players)
+        {x, y} = Grid.find_free_cell(state.grid, state.players)
 
         updated_player = %{player | x: x, y: y, alive: true}
 
@@ -99,9 +99,9 @@ defmodule ElxServer.GameServer do
   # SERVER CALLBACKS
   # ────────────────────────────────────────────────────────────────────────────
   def init(_) do
-    schedule_tick(GameUtils.now_ms())
-    grid = GameUtils.build_grid()
-    {:ok, %State{grid: grid, last_refill: GameUtils.now_ms()}}
+    schedule_tick(now_ms())
+    grid = Grid.build_grid()
+    {:ok, %State{grid: grid, last_refill: now_ms()}}
   end
 
   def handle_call({:add_player, color}, _from, %State{} = state) do
@@ -147,12 +147,12 @@ defmodule ElxServer.GameServer do
     nx = x + dx
     ny = y + dy
 
-    with true <- GameUtils.in_bounds?(nx, ny),
+    with true <- Grid.in_bounds?(nx, ny),
          true <- alive,
          false <- Map.get(state.grid, {nx, ny}) in @blocked do
       state =
         Map.update!(players, id, &%{&1 | x: nx, y: ny})
-        |> GameUtils.check_powerup({nx, ny}, id, state)
+        |> Player.check_powerup({nx, ny}, id, state)
 
       {:noreply, %{state | updated_players: MapSet.put(state.updated_players, id)}}
     else
@@ -209,8 +209,12 @@ defmodule ElxServer.GameServer do
   # ────────────────────────────────────────────────────────────────────────────
   # HELPERS
   # ────────────────────────────────────────────────────────────────────────────
+  def now_ms do
+    System.monotonic_time(:millisecond)
+  end
+
   defp schedule_tick(started_at) when is_integer(started_at) do
-    elapsed = GameUtils.now_ms() - started_at
+    elapsed = now_ms() - started_at
     wait = max(@tick_ms - elapsed, 0)
     Process.send_after(self(), :tick, wait)
   end
@@ -234,7 +238,7 @@ defmodule ElxServer.GameServer do
 
     if Enum.any?(exploding) do
       Enum.reduce(exploding, %{state | bombs: live_bombs}, fn bomb, acc ->
-        GameUtils.explode_bomb(bomb, acc)
+        Bomb.explode(bomb, acc)
       end)
     else
       state
@@ -248,7 +252,7 @@ defmodule ElxServer.GameServer do
       end)
 
     if Enum.any?(explosion_end) do
-      {new_state} = GameUtils.end_explosions(explosion_end, state)
+      {new_state} = Explosion.end_explosions(explosion_end, state)
 
       new_state =
         %State{

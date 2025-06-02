@@ -1,8 +1,8 @@
 defmodule ElxServerWeb.GameChannel do
   use ElxServerWeb, :channel
 
-  alias ElxServer.GameUtils
   alias ElxServer.Game
+  alias ElxServer.Grid
 
   def join("game:lobby", %{"color" => color}, socket) do
     player_id = Game.add_player(color)
@@ -18,7 +18,7 @@ defmodule ElxServerWeb.GameChannel do
       "type" => "init",
       "playerId" => socket.assigns.player_id,
       "grid" => grid |> format_grid_for_client(),
-      "gridSize" => GameUtils.get_grid_size(),
+      "gridSize" => Grid.get_grid_size(),
       "players" => players,
       "scores" => scores
     })
@@ -52,7 +52,7 @@ defmodule ElxServerWeb.GameChannel do
   defp format_grid_for_client(grid) do
     grid
     |> Enum.map(fn {{x, y}, cell} ->
-      %{"x" => x, "y" => y, "value" => GameUtils.Cell.to_int(cell)}
+      %{"x" => x, "y" => y, "value" => Grid.Cell.to_int(cell)}
     end)
   end
 end
