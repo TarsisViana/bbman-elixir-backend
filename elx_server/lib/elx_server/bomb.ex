@@ -24,6 +24,12 @@ defmodule ElxServer.Bomb do
     System.monotonic_time(:millisecond)
   end
 
+  def explode_multiple(%State{} = state, exploding) do
+    Enum.reduce(exploding, state, fn bomb, acc ->
+      explode(bomb, acc)
+    end)
+  end
+
   def explode(%__MODULE__{owner: %Player{} = owner} = bomb, %State{} = state) do
     new_state = %{
       state

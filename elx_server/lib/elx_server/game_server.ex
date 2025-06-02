@@ -15,6 +15,7 @@ defmodule ElxServer.GameServer do
 
   defmodule State do
     alias ElxServer.Explosion
+    use Accessible
 
     defstruct [
       :last_refill,
@@ -44,8 +45,8 @@ defmodule ElxServer.GameServer do
     started_at = now_ms()
 
     state
-    |> timeout_check(:bombs, started_at)
-    |> timeout_check(:explosions, started_at)
+    |> check_timeout(:bombs, started_at)
+    |> check_timeout(:explosions, started_at)
     |> Grid.maybe_refill_crates(started_at)
     |> diff_or_idle(started_at)
   end
@@ -75,12 +76,12 @@ defmodule ElxServer.GameServer do
          started_at
        )
        when map_size(up_players) > 0 or map_size(up_cells) > 0 do
-    updated_players =
+    updated_players_snapshots =
       Enum.map(up_players, fn id -> state.players |> Map.fetch!(id) |> Player.snapshot() end)
 
     msg = %{
       "type" => @event_diff,
-      "updatedPlayers" => updated_players,
+      "updatedPlayers" => updated_players_snapshots,
       "updatedCells" => Enum.map(up_cells, &%{&1 | value: Cell.to_int(&1.value)}),
       "scores" => get_scores(state.players)
     }
@@ -107,21 +108,19 @@ defmodule ElxServer.GameServer do
   def handle_call({:add_player, color}, _from, %State{} = state) do
     new_player = Player.create(color, state.grid, state.players)
 
-    new_state = %State{
+    new_state =
       state
-      | players: Map.put(state.players, new_player.id, new_player),
-        updated_players: MapSet.put(state.updated_players, new_player.id)
-    }
+      |> update_in([:players, new_player.id], fn _ -> new_player end)
+      |> update_in([:updated_players], &MapSet.put(&1, new_player.id))
 
     {:reply, new_player.id, new_state}
   end
 
-  def handle_call(:init_player_msg, _from, state) do
-    grid = state.grid
-    players = Enum.map(state.players, fn {_id, player} -> Player.snapshot(player) end)
-    scores = get_scores(state.players)
+  def handle_call(:init_player_msg, _from, %State{grid: grid, players: players} = state) do
+    players_snapshots = Enum.map(players, fn {_id, player} -> Player.snapshot(player) end)
+    scores = get_scores(players)
 
-    {:reply, {grid, players, scores}, state}
+    {:reply, {grid, players_snapshots, scores}, state}
   end
 
   def handle_cast({:remove_player, id}, state) do
@@ -150,11 +149,13 @@ defmodule ElxServer.GameServer do
     with true <- Grid.in_bounds?(nx, ny),
          true <- alive,
          false <- Map.get(state.grid, {nx, ny}) in @blocked do
-      state =
-        Map.update!(players, id, &%{&1 | x: nx, y: ny})
-        |> Player.check_powerup({nx, ny}, id, state)
+      new_state =
+        state
+        |> update_in([:players, id], &%{&1 | x: nx, y: ny})
+        |> Player.check_powerup({nx, ny}, id)
+        |> update_in([:updated_players], &MapSet.put(&1, id))
 
-      {:noreply, %{state | updated_players: MapSet.put(state.updated_players, id)}}
+      {:noreply, new_state}
     else
       _ -> {:noreply, state}
     end
@@ -162,44 +163,28 @@ defmodule ElxServer.GameServer do
 
   def handle_cast({:move, _}, state), do: {:noreply, state}
 
-  def handle_cast({:bomb, id}, %State{} = state) do
-    case Map.get(state.players, id) do
-      nil ->
-        {:noreply, state}
+  def handle_cast({:bomb, id}, %State{players: players} = state)
+      when is_map_key(players, id) do
+    pl = players[id]
 
-      %Player{alive: false} ->
-        {:noreply, state}
+    if pl.alive == false or pl.active_bombs >= pl.max_bombs do
+      {:noreply, state}
+    else
+      bomb = Bomb.new(pl.x, pl.y, pl)
 
-      %Player{} = pl ->
-        if pl.active_bombs >= pl.max_bombs do
-          {:noreply, state}
-        else
-          bomb = Bomb.new(pl.x, pl.y, pl)
+      new_state =
+        state
+        |> put_in([:grid, {pl.x, pl.y}], :bomb)
+        |> update_in([:bombs], &[bomb | &1])
+        |> update_in([:players, id], &%{&1 | active_bombs: &1.active_bombs + 1})
+        |> update_in([:updated_players], &MapSet.put(&1, id))
+        |> update_in([:updated_cells], &MapSet.put(&1, %{x: pl.x, y: pl.y, value: :bomb}))
 
-          new_state =
-            %State{
-              state
-              | grid: Map.put(state.grid, {pl.x, pl.y}, :bomb),
-                bombs: [bomb | state.bombs],
-                players:
-                  Map.update!(state.players, id, fn p ->
-                    %{p | active_bombs: p.active_bombs + 1}
-                  end),
-                updated_players: MapSet.put(state.updated_players, id),
-                updated_cells:
-                  MapSet.put(
-                    state.updated_cells,
-                    %{x: pl.x, y: pl.y, value: :bomb}
-                  )
-            }
-
-          {:noreply, new_state}
-        end
-
-      _ ->
-        {:noreply, state}
+      {:noreply, new_state}
     end
   end
+
+  def handle_cast({:bomb, _}, state), do: {:noreply, state}
 
   def handle_cast(msg, state) do
     IO.warn("Unhandled cast: #{inspect(msg)}")
@@ -233,36 +218,31 @@ defmodule ElxServer.GameServer do
     end)
   end
 
-  def timeout_check(%State{bombs: bombs} = state, :bombs, time) do
+  def check_timeout(%State{bombs: bombs} = state, :bombs, time) do
     {live_bombs, exploding} = Enum.split_with(bombs, fn bomb -> bomb.explode_at > time end)
 
-    if Enum.any?(exploding) do
-      Enum.reduce(exploding, %{state | bombs: live_bombs}, fn bomb, acc ->
-        Bomb.explode(bomb, acc)
-      end)
-    else
-      state
+    case exploding do
+      [] ->
+        state
+
+      _ ->
+        state
+        |> put_in([:bombs], live_bombs)
+        |> Bomb.explode_multiple(exploding)
     end
   end
 
-  def timeout_check(%State{explosions: explosions} = state, :explosions, time) do
-    {exploding, explosion_end} =
-      Enum.split_with(explosions, fn explosion ->
-        explosion.clear_at > time
-      end)
+  def check_timeout(%State{explosions: explosions} = state, :explosions, time) do
+    {exploding, expired} = Enum.split_with(explosions, &(&1.clear_at > time))
 
-    if Enum.any?(explosion_end) do
-      {new_state} = Explosion.end_explosions(explosion_end, state)
+    case expired do
+      [] ->
+        state
 
-      new_state =
-        %State{
-          new_state
-          | explosions: exploding
-        }
-
-      new_state
-    else
-      state
+      _ ->
+        state
+        |> Explosion.end_explosions(expired)
+        |> put_in([:explosions], exploding)
     end
   end
 end

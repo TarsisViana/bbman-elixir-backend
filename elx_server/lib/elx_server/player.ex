@@ -65,7 +65,7 @@ defmodule ElxServer.Player do
     end)
   end
 
-  def check_powerup(players, pos, id, %State{} = state) do
+  def check_powerup(%State{players: players} = state, pos, id) do
     case Map.get(state.grid, pos) do
       :powerup_bomb ->
         updated_players =

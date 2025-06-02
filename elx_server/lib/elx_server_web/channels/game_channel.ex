@@ -12,14 +12,14 @@ defmodule ElxServerWeb.GameChannel do
   end
 
   def handle_info(:after_join, socket) do
-    {grid, players, scores} = Game.init_player_msg()
+    {grid, players_snapshots, scores} = Game.init_player_msg()
 
     push(socket, "init", %{
       "type" => "init",
       "playerId" => socket.assigns.player_id,
       "grid" => grid |> format_grid_for_client(),
       "gridSize" => Grid.get_grid_size(),
-      "players" => players,
+      "players" => players_snapshots,
       "scores" => scores
     })
 
