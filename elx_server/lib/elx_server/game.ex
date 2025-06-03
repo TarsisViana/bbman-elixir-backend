@@ -16,5 +16,5 @@ defmodule ElxServer.Game do
   def player_bomb(id), do: GenServer.cast(GameServer, {:bomb, id})
 
   def schedule_respawn(id),
-    do: Process.send_after(GameServer, {:schedule_respawn, id}, @respawn_ms)
+    do: Process.send_after(GameServer, {:respawn_player, id}, @respawn_ms)
 end

@@ -51,25 +51,19 @@ defmodule ElxServer.GameServer do
     |> diff_or_idle(started_at)
   end
 
-  def handle_info({:schedule_respawn, id}, %State{} = state) do
-    case Map.get(state.players, id) do
-      nil ->
-        {:noreply, state}
+  def handle_info({:respawn_player, id}, %State{players: players} = state)
+      when is_map_key(players, id) do
+    {x, y} = Grid.find_free_cell(state.grid, players)
 
-      player ->
-        {x, y} = Grid.find_free_cell(state.grid, state.players)
+    new_state =
+      state
+      |> update_in([:players, id], &%{&1 | x: x, y: y, alive: true})
+      |> update_in([:updated_players], &MapSet.put(&1, id))
 
-        updated_player = %{player | x: x, y: y, alive: true}
-
-        new_state = %{
-          state
-          | players: Map.put(state.players, updated_player.id, updated_player),
-            updated_players: MapSet.put(state.updated_players, updated_player.id)
-        }
-
-        {:noreply, new_state}
-    end
+    {:noreply, new_state}
   end
+
+  def handle_info({:respawn_player, _}, state), do: {:no_reply, state}
 
   defp diff_or_idle(
          %State{updated_players: up_players, updated_cells: up_cells} = state,
@@ -77,7 +71,8 @@ defmodule ElxServer.GameServer do
        )
        when map_size(up_players) > 0 or map_size(up_cells) > 0 do
     updated_players_snapshots =
-      Enum.map(up_players, fn id -> state.players |> Map.fetch!(id) |> Player.snapshot() end)
+      up_players
+      |> Enum.map(fn id -> state.players |> Map.fetch!(id) |> Player.snapshot() end)
 
     msg = %{
       "type" => @event_diff,
@@ -117,23 +112,18 @@ defmodule ElxServer.GameServer do
   end
 
   def handle_call(:init_player_msg, _from, %State{grid: grid, players: players} = state) do
-    players_snapshots = Enum.map(players, fn {_id, player} -> Player.snapshot(player) end)
+    players_snapshots = players |> Map.values() |> Enum.map(&Player.snapshot/1)
     scores = get_scores(players)
 
     {:reply, {grid, players_snapshots, scores}, state}
   end
 
-  def handle_cast({:remove_player, id}, state) do
-    case Map.has_key?(state.players, id) do
-      false ->
-        {:noreply, state}
-
-      true ->
-        new_players = Map.delete(state.players, id)
-
-        {:noreply, %{state | players: new_players}}
-    end
+  def handle_cast({:remove_player, id}, state)
+      when is_map_key(state.players, id) do
+    {:noreply, state |> update_in([:players], &Map.delete(&1, id))}
   end
+
+  def handle_cast({:remove_player, _}, state), do: {:noreply, state}
 
   # ────────────────────────────────────────────────────────────────────────────
   # ACTION HANDLERS
@@ -187,7 +177,7 @@ defmodule ElxServer.GameServer do
   def handle_cast({:bomb, _}, state), do: {:noreply, state}
 
   def handle_cast(msg, state) do
-    IO.warn("Unhandled cast: #{inspect(msg)}")
+    IO.puts("Unhandled cast: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -200,6 +190,7 @@ defmodule ElxServer.GameServer do
 
   defp schedule_tick(started_at) when is_integer(started_at) do
     elapsed = now_ms() - started_at
+    # if the elapsed is bigger then the tick_ms run now
     wait = max(@tick_ms - elapsed, 0)
     Process.send_after(self(), :tick, wait)
   end
