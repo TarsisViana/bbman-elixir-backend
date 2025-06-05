@@ -1,15 +1,23 @@
-# Simple Bomberman 
-
+# Bomberman Elixir Backend 
+A real-time multiplayer backend for a Bomberman-style game, built with **Elixir**, **Phoenix**, and **WebSockets**. This server manages the core gameplay logic, player coordination, and fast communication with a minimal TypeScript frontend.
 ## Setup
 
-1. Initialize project and install TypeScript:
-```bash
-npm init -y
-npm install typescript --save-dev
-npx tsc --init
-```
+### Prerequisites
+ - Elixir (and Erlang) installed on your machine.
+ - Node.js and npm for frontend development.
 
-2. Compile and Monitor changes
+1. Set up the Elixir backend:
 ```bash
-npm run monitor
+cd elx-server
+mix deps.get
+mix phx.server
 ```
+The backend should now be running at http://localhost:4000.
+
+2. Set up the frontend with Vite
+In the root folder:
+```bash
+npm install
+npm run dev
+```
+The frontend will typically run at http://localhost:5173
