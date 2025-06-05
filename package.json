@@ -15,9 +15,10 @@
   "devDependencies": {
     "@types/phoenix": "^1.6.6",
     "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "vite": "^4.4.0"
   },
   "dependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.41.1",
     "phoenix": "^1.7.21"
   }
 }
