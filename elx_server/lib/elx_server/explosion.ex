@@ -25,30 +25,16 @@ defmodule ElxServer.Explosion do
   end
 
   def blast({x, y} = pos, owner, %State{} = state) do
-    # explode other bombs in range
     cell = Map.get(state.grid, pos)
-    updated_bombs = chain_explosion(pos, cell, state.bombs)
-    # decide what should re-appear after the flame
     restore = maybe_powerup(cell)
-    # explode
-    {new_grid, updated_cells} =
-      Grid.set_cell({x, y}, :explosion, {state.grid, state.updated_cells})
 
+    state
+    # explode other bombs in range
+    |> update_in([:bombs], &chain_explosion(pos, cell, &1))
+    |> Grid.set_cell({x, y}, :explosion)
     # schedule cell restoration
-    new_explosions = [new(x, y, restore) | state.explosions]
-
-    # kill players in range
-    {new_players, updated_players} = Player.kill_player_at({x, y}, owner, state)
-
-    %State{
-      state
-      | grid: new_grid,
-        updated_cells: updated_cells,
-        bombs: updated_bombs,
-        explosions: new_explosions,
-        players: new_players,
-        updated_players: updated_players
-    }
+    |> update_in([:explosions], &[new(x, y, restore) | &1])
+    |> Player.kill_player_at({x, y}, owner)
   end
 
   defp maybe_powerup(:crate) do
@@ -68,14 +54,8 @@ defmodule ElxServer.Explosion do
 
   def end_explosions(%State{} = state, explosions) do
     Enum.reduce(explosions, state, fn explosion, acc ->
-      {new_grid, updated_cells} =
-        Grid.set_cell(
-          {explosion.x, explosion.y},
-          explosion.restore_to,
-          {acc.grid, acc.updated_cells}
-        )
-
-      %{acc | grid: new_grid, updated_cells: updated_cells}
+      acc
+      |> Grid.set_cell({explosion.x, explosion.y}, explosion.restore_to)
     end)
   end
 

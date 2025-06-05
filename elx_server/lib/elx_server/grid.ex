@@ -90,14 +90,13 @@ defmodule ElxServer.Grid do
     [@rows, @columns]
   end
 
-  def set_cell({x, y}, value, {grid, updated_cells}) do
-    if in_bounds?(x, y) and Map.get(grid, {x, y}) != value do
-      grid = Map.put(grid, {x, y}, value)
-      updated_cells = MapSet.put(updated_cells, %{x: x, y: y, value: value})
-
-      {grid, updated_cells}
+  def set_cell(%State{grid: grid} = state, {x, y}, value) do
+    if not in_bounds?(x, y) and Map.get(grid, {x, y}) == value do
+      state
     else
-      {grid, updated_cells}
+      state
+      |> put_in([:grid, {x, y}], value)
+      |> update_in([:updated_cells], &MapSet.put(&1, %{x: x, y: y, value: value}))
     end
   end
 
@@ -116,7 +115,7 @@ defmodule ElxServer.Grid do
   end
 
   defp refill_crates(
-         %State{grid: grid, players: players, updated_cells: updated_cells} = state,
+         %State{grid: grid, players: players} = state,
          now
        ) do
     total = @columns * @rows
@@ -124,15 +123,15 @@ defmodule ElxServer.Grid do
     current = crate_count(grid)
     needed = desired - current
 
-    {updated_grid, up_cells} =
-      Enum.reduce(1..needed, {grid, updated_cells}, fn _, {g, uc} ->
-        case find_free_cell(g, players) do
-          {:error, _} -> {g, uc}
-          pos -> set_cell(pos, :crate, {g, uc})
+    new_state =
+      Enum.reduce(1..needed, state, fn _, acc ->
+        case find_free_cell(acc.grid, players) do
+          {:error, _} -> acc
+          pos -> set_cell(acc, pos, :crate)
         end
       end)
 
-    %{state | grid: updated_grid, last_refill: now, updated_cells: up_cells}
+    %State{new_state | last_refill: now}
   end
 
   defp crate_count(grid) do

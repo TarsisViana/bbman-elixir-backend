@@ -1,5 +1,5 @@
 defmodule ElxServer.Player do
-  alias ElxServer.{Grid, GameServer.State}
+  alias ElxServer.{Grid, GameServer.State, Game}
 
   defstruct [
     :id,
@@ -36,59 +36,50 @@ defmodule ElxServer.Player do
     }
   end
 
-  def kill_player_at({x, y}, bomb_owner, %State{} = state) do
-    Enum.reduce(state.players, {state.players, state.updated_players}, fn
-      {id, %__MODULE__{alive: true, x: ^x, y: ^y} = pl}, {acc_pl, acc_ids} ->
-        # Kill the fool
-        acc_pl = Map.put(acc_pl, id, %{pl | alive: false, deaths: pl.deaths + 1})
-        acc_ids = MapSet.put(acc_ids, id)
+  def kill_player_at(%State{} = state, {x, y}, bomb_owner) do
+    acc =
+      Enum.reduce(state.players, %{pl: state.players, up_pl: state.updated_players}, fn
+        {id, %__MODULE__{alive: true, x: ^x, y: ^y}}, acc ->
+          acc
+          |> kill_player(id)
+          |> maybe_credit_kill(bomb_owner, id)
+          |> update_in([:up_pl], &MapSet.put(&1, bomb_owner.id))
+          |> tap(fn _ -> Game.schedule_respawn(id) end)
 
-        # kill credit
-        acc_pl =
-          if id != bomb_owner.id do
-            Map.update!(acc_pl, bomb_owner.id, fn player ->
-              %{player | kills: player.kills + 1}
-            end)
-          else
-            acc_pl
-          end
+        _, acc ->
+          acc
+      end)
 
-        acc_ids = MapSet.put(acc_ids, bomb_owner.id)
-
-        # Schedule respawn
-        ElxServer.Game.schedule_respawn(id)
-
-        {acc_pl, acc_ids}
-
-      _, acc ->
-        acc
-    end)
+    %State{state | players: acc.pl, updated_players: acc.up_pl}
   end
 
-  def check_powerup(%State{players: players} = state, pos, id) do
+  defp kill_player(acc, id) do
+    acc
+    |> update_in([:players, id], &%{&1 | alive: false, deaths: &1.deaths + 1})
+    |> update_in([:updated_players], &MapSet.put(&1, id))
+  end
+
+  defp maybe_credit_kill(acc, %__MODULE__{id: killer_id}, victim_id)
+       when killer_id != victim_id do
+    update_in(acc, [:players, killer_id], &%{&1 | kills: &1.kills + 1})
+  end
+
+  defp maybe_credit_kill(acc, _killer, _victim), do: acc
+
+  def check_powerup(%State{} = state, pos, id) do
     case Map.get(state.grid, pos) do
+      cell when cell not in [:powerup_bomb, :powerup_fire] ->
+        state
+
       :powerup_bomb ->
-        updated_players =
-          Map.update!(players, id, fn %__MODULE__{} = player ->
-            %{player | max_bombs: player.max_bombs + 1}
-          end)
-
-        {grid, updated_cells} = Grid.set_cell(pos, :empty, {state.grid, state.updated_cells})
-
-        %{state | grid: grid, players: updated_players, updated_cells: updated_cells}
+        state
+        |> update_in([:players, id], &%{&1 | max_bombs: &1.max_bombs + 1})
+        |> Grid.set_cell(pos, :empty)
 
       :powerup_fire ->
-        updated_players =
-          Map.update!(players, id, fn %__MODULE__{} = player ->
-            %{player | fire_power: player.fire_power + 1}
-          end)
-
-        {grid, updated_cells} = Grid.set_cell(pos, :empty, {state.grid, state.updated_cells})
-
-        %{state | grid: grid, players: updated_players, updated_cells: updated_cells}
-
-      _ ->
-        %{state | players: players}
+        state
+        |> update_in([:players, id], &%{&1 | fire_power: &1.fire_power + 1})
+        |> Grid.set_cell(pos, :empty)
     end
   end
 end
