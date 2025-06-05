@@ -24,7 +24,7 @@ defmodule ElxServer.Explosion do
     System.monotonic_time(:millisecond)
   end
 
-  def blast({x, y} = pos, owner, %State{} = state) do
+  def blast(%State{} = state, {x, y} = pos, owner) do
     cell = Map.get(state.grid, pos)
     restore = maybe_powerup(cell)
 
