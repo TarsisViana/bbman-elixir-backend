@@ -55,13 +55,13 @@ defmodule ElxServer.Player do
 
   defp kill_player(acc, id) do
     acc
-    |> update_in([:players, id], &%{&1 | alive: false, deaths: &1.deaths + 1})
-    |> update_in([:updated_players], &MapSet.put(&1, id))
+    |> update_in([:pl, id], &%{&1 | alive: false, deaths: &1.deaths + 1})
+    |> update_in([:up_pl], &MapSet.put(&1, id))
   end
 
   defp maybe_credit_kill(acc, %__MODULE__{id: killer_id}, victim_id)
        when killer_id != victim_id do
-    update_in(acc, [:players, killer_id], &%{&1 | kills: &1.kills + 1})
+    update_in(acc, [:pl, killer_id], &%{&1 | kills: &1.kills + 1})
   end
 
   defp maybe_credit_kill(acc, _killer, _victim), do: acc
