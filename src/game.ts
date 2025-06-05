@@ -96,7 +96,7 @@ function send(message: ClientMessage) {
 }
 
 function connect(color: string) {
-  websocket = new Socket("ws://localhost:4000/socket");
+  websocket = new Socket("ws://bbman-elx.fly.dev/socket");
   websocket.connect()
 
   channel = websocket.channel("game:lobby", { color: color });
