@@ -16,7 +16,7 @@ defmodule ElxServerWeb.Endpoint do
     longpoll: false
   )
 
-  # plug CORSPlug, origin: ["http://localhost:3000"]  set cors if cors error
+  plug CORSPlug, origin: ["http://localhost:3000"]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
