@@ -53,9 +53,9 @@ defmodule ElxServer.Explosion do
   defp maybe_powerup(_cell), do: :empty
 
   def end_explosions(%State{} = state, explosions) do
-    Enum.reduce(explosions, state, fn explosion, acc ->
+    Enum.reduce(explosions, state, fn ex, acc ->
       acc
-      |> Grid.set_cell({explosion.x, explosion.y}, explosion.restore_to)
+      |> Grid.set_cell({ex.x, ex.y}, ex.restore_to)
     end)
   end
 

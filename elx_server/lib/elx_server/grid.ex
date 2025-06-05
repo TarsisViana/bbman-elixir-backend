@@ -91,12 +91,17 @@ defmodule ElxServer.Grid do
   end
 
   def set_cell(%State{grid: grid} = state, {x, y}, value) do
-    if not in_bounds?(x, y) and Map.get(grid, {x, y}) == value do
-      state
-    else
-      state
-      |> put_in([:grid, {x, y}], value)
-      |> update_in([:updated_cells], &MapSet.put(&1, %{x: x, y: y, value: value}))
+    cond do
+      not in_bounds?(x, y) ->
+        state
+
+      Map.get(grid, {x, y}) == value ->
+        state
+
+      true ->
+        state
+        |> put_in([:grid, {x, y}], value)
+        |> update_in([:updated_cells], &MapSet.put(&1, %{x: x, y: y, value: value}))
     end
   end
 
@@ -108,7 +113,7 @@ defmodule ElxServer.Grid do
   # skip if enough crates already exist
   def maybe_refill_crates(%State{grid: grid} = state, now) do
     if crate_count(grid) >= trunc(@columns * @rows * 0.10) do
-      %{state | last_refill: now}
+      %State{state | last_refill: now}
     else
       refill_crates(state, now)
     end
