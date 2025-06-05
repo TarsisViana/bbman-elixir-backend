@@ -3,7 +3,7 @@ FROM elixir:1.16-alpine
 RUN apk add --no-cache git build-base
 WORKDIR /app
 COPY . ./
-ENV MIX_ENV=prod
+ENV MIX_ENV=dev
 ENV PHX_SERVER=true
 
 RUN mix deps.get && mix setup
