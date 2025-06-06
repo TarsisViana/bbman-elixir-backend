@@ -1,5 +1,5 @@
 # Bomberman Elixir Backend 
-A real-time multiplayer backend for a Bomberman-style game, built with **Elixir**, **Phoenix**, and **WebSockets**. This server manages the core gameplay logic, player coordination, and fast communication with a minimal TypeScript frontend.
+A real-time multiplayer backend for a Bomberman-style game, built with **Elixir**, **Phoenix**, and **WebSockets**. This server manages the core gameplay logic, player coordination, and fast communication with a minimal TypeScript frontend. The server is published on Fly.io with an Docker image.
 ## Setup
 
 ### Prerequisites
