@@ -1,0 +1,4 @@
+elx_server
+node_modules
+elx_server/*
+node_modules/*

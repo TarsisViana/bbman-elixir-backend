@@ -96,7 +96,9 @@ function send(message: ClientMessage) {
 }
 
 function connect(color: string) {
-  websocket = new Socket("ws://bbman-elx.fly.dev/socket");
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  const host = import.meta.env.VITE_SOCKET_HOST || "bbman-elx.fly.dev";
+  const websocket = new Socket(`${protocol}://${host}/socket`);
   websocket.connect()
 
   channel = websocket.channel("game:lobby", { color: color });

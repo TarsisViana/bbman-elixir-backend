@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bomberman</title>
+  <style>
+    body { display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }
+    #menu { margin-top: 50px; }
+    #scoreboard { margin-top: 20px; font-size: 18px; }
+    #game { background: #000; display: none; margin-top: 10px; }
+    button, select { margin: 5px; padding: 10px; font-size: 16px; }
+  </style>
+  <script type="module" crossorigin src="/assets/index-z7o-Hl_J.js"></script>
+</head>
+<body>
+  <div id="menu">
+    <label for="color">Choose your color:</label>
+    <input type="color" id="playerColor">
+
+    <script>
+        const randomHex = '#' + Math.floor(Math.random() * 0xFFFFFF)
+                            .toString(16)
+                            .padStart(6, '0');
+
+        const picker = document.getElementById('playerColor');
+        picker.value = randomHex;
+        picker.setAttribute('value', randomHex);
+    </script>
+    <br />
+    <button id="playOnline">Play online</button>
+
+  </div>
+
+  <div id="scoreboard" style="display: none;">
+    Kills: <span id="kills">0</span>
+    &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
+    &nbsp;|&nbsp; Assists: <span id="assists">0</span>
+  </div>
+
+  <canvas id="game"></canvas>
+</body>
+</html>
