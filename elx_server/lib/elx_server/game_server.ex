@@ -68,22 +68,24 @@ defmodule ElxServer.GameServer do
   defp diff_or_idle(
          %State{updated_players: up_players, updated_cells: up_cells} = state,
          started_at
-       )
-       when map_size(up_players) > 0 or map_size(up_cells) > 0 do
-    updated_players_snapshots =
-      up_players
-      |> Enum.map(fn id -> state.players |> Map.fetch!(id) |> Player.snapshot() end)
+       ) do
+    if MapSet.size(up_players) == 0 and MapSet.size(up_cells) == 0 do
+      schedule_tick(started_at)
+      {:noreply, state}
+    else
+      updated_players_snapshots = get_snapshots(up_players, state.players)
 
-    msg = %{
-      "type" => @event_diff,
-      "updatedPlayers" => updated_players_snapshots,
-      "updatedCells" => Enum.map(up_cells, &%{&1 | value: Cell.to_int(&1.value)}),
-      "scores" => get_scores(state.players)
-    }
+      msg = %{
+        "type" => @event_diff,
+        "updatedPlayers" => updated_players_snapshots,
+        "updatedCells" => Enum.map(up_cells, &%{&1 | value: Cell.to_int(&1.value)}),
+        "scores" => get_scores(state.players)
+      }
 
-    Endpoint.broadcast(@topic, @event_diff, msg)
-    schedule_tick(started_at)
-    {:noreply, %State{state | updated_players: MapSet.new(), updated_cells: MapSet.new()}}
+      Endpoint.broadcast(@topic, @event_diff, msg)
+      schedule_tick(started_at)
+      {:noreply, %State{state | updated_players: MapSet.new(), updated_cells: MapSet.new()}}
+    end
   end
 
   defp diff_or_idle(%State{} = state, started_at) do
@@ -120,7 +122,12 @@ defmodule ElxServer.GameServer do
 
   def handle_cast({:remove_player, id}, state)
       when is_map_key(state.players, id) do
-    {:noreply, state |> update_in([:players], &Map.delete(&1, id))}
+    new_state =
+      state
+      |> update_in([:players], &Map.delete(&1, id))
+      |> update_in([:updated_players], &MapSet.put(&1, id))
+
+    {:noreply, new_state}
   end
 
   def handle_cast({:remove_player, _}, state), do: {:noreply, state}
@@ -235,5 +242,24 @@ defmodule ElxServer.GameServer do
         |> Explosion.end_explosions(expired)
         |> put_in([:explosions], exploding)
     end
+  end
+
+  defp get_snapshots(up_players, players) do
+    up_players
+    |> Enum.map(fn id ->
+      case players |> Map.fetch(id) do
+        {:ok, player} ->
+          Player.snapshot(player)
+
+        :error ->
+          Player.snapshot(%Player{
+            id: id,
+            x: 0,
+            y: 0,
+            alive: false,
+            color: "gray"
+          })
+      end
+    end)
   end
 end
